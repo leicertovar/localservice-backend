@@ -11,18 +11,24 @@ use Tymon\JWTAuth\Exceptions\JWTException;
 
 class AuthController extends Controller
 {
-    public function registrer(Request $request)
+    public function register(Request $request)
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
+            'last_name' => 'nullable|string|max:255',
             'email' => 'required|email|unique:users',
+            'phone' => 'nullable|string|unique:users',
             'password' => 'required|string|min:8|confirmed',
+            'role' => 'nullable|in:cliente,proveedor,admin',
         ]);
 
         $user = User::create([
             'name' => $validated['name'],
+            'last_name' => $validated['last_name'] ?? null,
             'email' => $validated['email'],
+            'phone' => $validated['phone'] ?? null,
             'password' => Hash::make($validated['password']),
+            'role' => $validated['role'] ?? 'cliente',
         ]);
 
         $token = JWTAuth::fromUser($user);

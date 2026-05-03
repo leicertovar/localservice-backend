@@ -26,8 +26,11 @@ class User extends Authenticatable implements JWTSubject
      */
     protected $fillable = [
         'name',
+        'last_name',
         'email',
+        'phone',
         'password',
+        'role',
     ];
 
     /**
@@ -51,6 +54,14 @@ class User extends Authenticatable implements JWTSubject
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Get the provider profile associated with the user.
+     */
+    public function providerProfile()
+    {
+        return $this->hasOne(ProviderProfile::class, 'user_id', 'id');
     }
 
         /**
