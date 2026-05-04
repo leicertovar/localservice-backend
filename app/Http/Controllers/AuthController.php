@@ -69,4 +69,15 @@ class AuthController extends Controller
             return response()->json(['message' => 'Could not refresh token'], 401);
         }
     }
+
+    public function me(Request $request)
+    {
+        $user = $request->user();
+
+        return response()->json([
+            'name' => $user->name,
+            'email' => $user->email,
+            'phone' => $user->phone,
+        ]);
+    }
 }
