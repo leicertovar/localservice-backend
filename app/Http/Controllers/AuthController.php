@@ -69,4 +69,10 @@ class AuthController extends Controller
             return response()->json(['message' => 'Could not refresh token'], 401);
         }
     }
+
+    public function me()
+    {
+        return response()->json(JWTAuth::user());
+        
+    }
 }
