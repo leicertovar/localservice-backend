@@ -317,4 +317,106 @@ class AuthController extends Controller
         $usuario->load(['rol', 'perfilCliente', 'perfilProveedor']);
         return response()->json($usuario);
     }
+
+    /**
+     * Administrador: Obtiene la lista completa de todos los usuarios registrados
+     * con sus perfiles de cliente y proveedor correspondientes.
+     */
+    public function obtenerUsuarios()
+    {
+        $administrador = JWTAuth::user();
+        if (!$administrador || $administrador->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado. Se requieren privilegios de administrador.'], 403);
+        }
+
+        $usuarios = Usuario::with(['rol', 'perfilCliente', 'perfilProveedor'])->get();
+
+        return response()->json([
+            'usuarios' => $usuarios
+        ]);
+    }
+
+    /**
+     * Administrador: Elimina a un usuario de la base de datos de manera definitiva.
+     */
+    public function eliminarUsuario($id)
+    {
+        $administrador = JWTAuth::user();
+        if (!$administrador || $administrador->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado. Se requieren privilegios de administrador.'], 403);
+        }
+
+        $usuario = Usuario::find($id);
+        if (!$usuario) {
+            return response()->json(['mensaje' => 'Usuario no encontrado.'], 404);
+        }
+
+        // Evitar que el administrador se elimine a sí mismo
+        if ($usuario->id === $administrador->id) {
+            return response()->json(['mensaje' => 'No puedes eliminar tu propia cuenta de administrador.'], 400);
+        }
+
+        $usuario->delete();
+
+        return response()->json([
+            'mensaje' => 'Usuario eliminado con éxito de LocalService.'
+        ]);
+    }
+
+    /**
+     * Administrador: Rechaza la verificación de un proveedor y elimina su cuenta.
+     */
+    public function rechazarProveedor($id)
+    {
+        $administrador = JWTAuth::user();
+        if (!$administrador || $administrador->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado. Se requieren privilegios de administrador.'], 403);
+        }
+
+        $usuario = Usuario::find($id);
+        if (!$usuario) {
+            return response()->json(['mensaje' => 'Usuario no encontrado.'], 404);
+        }
+
+        $usuario->delete();
+
+        return response()->json([
+            'mensaje' => 'Solicitud de verificación rechazada y cuenta de proveedor eliminada.'
+        ]);
+    }
+
+    /**
+     * Administrador: Compila estadísticas reales sobre usuarios, roles, verificaciones y servicios.
+     */
+    public function obtenerEstadisticas()
+    {
+        $administrador = JWTAuth::user();
+        if (!$administrador || $administrador->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado. Se requieren privilegios de administrador.'], 403);
+        }
+
+        $totalUsuarios = Usuario::count();
+        $proveedoresVerificados = Usuario::where('rol_id', 2)->where('esta_aprobado', true)->count();
+        $verificacionesPendientes = Usuario::where('rol_id', 2)->where('esta_aprobado', false)->count();
+        
+        // Contadores por rol
+        $totalClientes = Usuario::where('rol_id', 1)->count();
+        $totalProveedores = Usuario::where('rol_id', 2)->count();
+
+        // Contadores por categoría de servicio populares
+        $categorias = PerfilProveedor::selectRaw('categoria_servicio, count(*) as total')
+            ->groupBy('categoria_servicio')
+            ->orderBy('total', 'desc')
+            ->get();
+
+        return response()->json([
+            'total_usuarios' => $totalUsuarios,
+            'proveedores_verificados' => $proveedoresVerificados,
+            'verificaciones_pendientes' => $verificacionesPendientes,
+            'resenas_reportadas' => 0, // Mock para cumplir con la UI existente
+            'clientes_count' => $totalClientes,
+            'proveedores_count' => $totalProveedores,
+            'categorias' => $categorias
+        ]);
+    }
 }

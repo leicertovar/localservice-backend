@@ -30,6 +30,11 @@ Route::group([
         // Rutas Administrativas de control de calidad y aprobación
         Route::get('/admin/proveedores-pendientes',  [AuthController::class, 'obtenerProveedoresPendientes']);
         Route::post('/admin/aprobar-proveedor/{id}', [AuthController::class, 'aprobarProveedor']);
+        Route::get('/admin/usuarios',                [AuthController::class, 'obtenerUsuarios']);
+        Route::delete('/admin/usuarios/{id}',        [AuthController::class, 'eliminarUsuario']);
+        // Rechazar verificación y eliminar solicitud de proveedor
+        Route::post('/admin/rechazar-proveedor/{id}', [AuthController::class, 'rechazarProveedor']);
+        Route::get('/admin/estadisticas',            [AuthController::class, 'obtenerEstadisticas']);
     });
     
 });
