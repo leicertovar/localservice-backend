@@ -6,12 +6,16 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Support\Carbon;
 use App\Models\Usuario;
 use App\Models\Rol;
 use App\Models\PerfilCliente;
 use App\Models\PerfilProveedor;
 use App\Mail\ProveedorRegistradoMail;
 use App\Mail\ProveedorAprobadoMail;
+use App\Mail\RestablecerPasswordMail;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
 
@@ -417,6 +421,101 @@ class AuthController extends Controller
             'clientes_count' => $totalClientes,
             'proveedores_count' => $totalProveedores,
             'categorias' => $categorias
+        ]);
+    }
+
+    /**
+     * Solicita la recuperación de contraseña enviando un enlace con un token seguro.
+     */
+    public function solicitarRecuperacionPassword(Request $request)
+    {
+        // 1. Validar que el correo exista en el sistema
+        $datosValidados = $request->validate([
+            'email' => 'required|email|exists:usuarios,email',
+        ]);
+
+        $email = $datosValidados['email'];
+        $usuario = Usuario::where('email', $email)->first();
+
+        // 2. Generar un token seguro y único
+        $token = Str::random(60);
+
+        // 3. Registrar o actualizar el token en la tabla 'password_reset_tokens'
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $email],
+            [
+                'token' => Hash::make($token), // Almacenamos el hash por seguridad
+                'created_at' => Carbon::now()
+            ]
+        );
+
+        $correoEnviado = false;
+        $errorCorreo = null;
+
+        // 4. Enviar el correo de restablecimiento en español
+        try {
+            Mail::to($email)->send(new RestablecerPasswordMail($usuario, $token, $email));
+            $correoEnviado = true;
+        } catch (\Exception $e) {
+            Log::error('Fallo al enviar correo de recuperación SMTP: ' . $e->getMessage());
+            $errorCorreo = $e->getMessage();
+        }
+
+        return response()->json([
+            'mensaje' => 'Se ha enviado un enlace de recuperación a su correo electrónico.',
+            'notificacion_correo' => [
+                'enviado' => $correoEnviado,
+                'error' => $errorCorreo
+            ]
+        ]);
+    }
+
+    /**
+     * Restablece la contraseña del usuario tras validar el token enviado.
+     */
+    public function restablecerPassword(Request $request)
+    {
+        // 1. Validar datos requeridos
+        $datosValidados = $request->validate([
+            'email' => 'required|email|exists:usuarios,email',
+            'token' => 'required|string',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $email = $datosValidados['email'];
+        $token = $datosValidados['token'];
+
+        // 2. Buscar el registro del token
+        $registroToken = DB::table('password_reset_tokens')
+            ->where('email', $email)
+            ->first();
+
+        if (!$registroToken) {
+            return response()->json(['mensaje' => 'No se ha solicitado recuperación para esta cuenta o el token es inválido.'], 400);
+        }
+
+        // 3. Validar si el token ha expirado (30 minutos de validez)
+        $fechaCreacion = Carbon::parse($registroToken->created_at);
+        if ($fechaCreacion->addMinutes(30)->isPast()) {
+            DB::table('password_reset_tokens')->where('email', $email)->delete();
+            return response()->json(['mensaje' => 'El enlace de recuperación ha expirado. Por favor, solicite uno nuevo.'], 400);
+        }
+
+        // 4. Validar el token cifrado
+        if (!Hash::check($token, $registroToken->token)) {
+            return response()->json(['mensaje' => 'Token de seguridad inválido o corrompido.'], 400);
+        }
+
+        // 5. Restablecer la contraseña en la cuenta del usuario
+        $usuario = Usuario::where('email', $email)->first();
+        $usuario->password = Hash::make($datosValidados['password']);
+        $usuario->save();
+
+        // 6. Eliminar el token usado para evitar dobles solicitudes
+        DB::table('password_reset_tokens')->where('email', $email)->delete();
+
+        return response()->json([
+            'mensaje' => 'Su contraseña ha sido restablecida con éxito. Ya puede iniciar sesión.'
         ]);
     }
 }

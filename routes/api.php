@@ -16,9 +16,11 @@ Route::group([
 ], function () {
 
     // Rutas de registro y acceso públicas
-    Route::post('/registro', [AuthController::class, 'registrar'])->name('auth.registro');
-    Route::post('/login', [AuthController::class, 'iniciarSesion'])->name('auth.login');
-    Route::post('/refrescar', [AuthController::class, 'refrescarToken'])->name('auth.refrescar');
+    Route::post('/registro',             [AuthController::class, 'registrar'])->name('auth.registro');
+    Route::post('/login',                [AuthController::class, 'iniciarSesion'])->name('auth.login');
+    Route::post('/refrescar',            [AuthController::class, 'refrescarToken'])->name('auth.refrescar');
+    Route::post('/recuperar-password',   [AuthController::class, 'solicitarRecuperacionPassword']);
+    Route::post('/restablecer-password', [AuthController::class, 'restablecerPassword']);
 
     // Rutas protegidas bajo el middleware de JWT (auth:api)
     Route::middleware('auth:api')->group(function () {
