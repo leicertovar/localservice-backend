@@ -40,3 +40,29 @@ Route::group([
     });
     
 });
+
+// Rutas públicas para ver listado y detalles de proveedores
+Route::get('/proveedores', [\App\Http\Controllers\ProveedorController::class, 'listarProveedores']);
+Route::get('/proveedores/{id}', [\App\Http\Controllers\ProveedorController::class, 'obtenerPerfilProveedor']);
+
+// Rutas protegidas para la gestión de perfil de proveedor, servicios y agenda/reservas
+Route::middleware('auth:api')->group(function () {
+    // Actualizar perfil
+    Route::put('/proveedor/perfil', [\App\Http\Controllers\ProveedorController::class, 'actualizarPerfilProveedor']);
+
+    // CRUD de servicios
+    Route::get('/servicios', [\App\Http\Controllers\ServicioController::class, 'listarServicios']);
+    Route::post('/servicios', [\App\Http\Controllers\ServicioController::class, 'crearServicio']);
+    Route::put('/servicios/{id}', [\App\Http\Controllers\ServicioController::class, 'actualizarServicio']);
+    Route::delete('/servicios/{id}', [\App\Http\Controllers\ServicioController::class, 'eliminarServicio']);
+    Route::patch('/servicios/{id}/activar', [\App\Http\Controllers\ServicioController::class, 'alternarEstadoServicio']);
+
+    // Solicitudes, Cotizaciones y Reservas
+    Route::post('/solicitudes', [\App\Http\Controllers\SolicitudServicioController::class, 'crearSolicitud']);
+    Route::get('/proveedor/solicitudes', [\App\Http\Controllers\SolicitudServicioController::class, 'obtenerSolicitudesProveedor']);
+    Route::get('/cliente/solicitudes', [\App\Http\Controllers\SolicitudServicioController::class, 'obtenerSolicitudesCliente']);
+    Route::post('/solicitudes/{id}/cotizar', [\App\Http\Controllers\SolicitudServicioController::class, 'cotizarSolicitud']);
+    Route::post('/solicitudes/{id}/aceptar', [\App\Http\Controllers\SolicitudServicioController::class, 'aceptarCotizacion']);
+    Route::post('/solicitudes/{id}/rechazar', [\App\Http\Controllers\SolicitudServicioController::class, 'rechazarSolicitud']);
+});
+
