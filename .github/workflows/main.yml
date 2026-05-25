@@ -57,6 +57,6 @@ jobs:
               php artisan optimize:clear
               php artisan optimize
             
-              php artisan migrate --forcé
+              php artisan migrate --force
             
               php artisan storage:link || true
