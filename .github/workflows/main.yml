@@ -60,4 +60,3 @@ jobs:
               php artisan migrate --forcé
             
               php artisan storage:link || true
-              php artisan db:seed
