@@ -104,6 +104,7 @@ class ProveedorController extends Controller
             'horario_atencion' => 'nullable',
             'ciudad' => 'nullable|string',
             'categoria_servicio' => 'nullable|string',
+            'foto_perfil' => 'nullable|file|mimes:jpg,jpeg,png,webp|max:5120',
         ]);
 
         // Actualizar datos de la tabla 'usuarios'
@@ -114,19 +115,28 @@ class ProveedorController extends Controller
             'email' => $datosValidados['email'],
         ]);
 
+        $datosPerfil = [
+            'biografia' => $datosValidados['biografia'] ?? null,
+            'anios_experiencia' => $datosValidados['anios_experiencia'] ?? 0,
+            'precio_por_hora' => $datosValidados['precio_por_hora'] ?? 0.00,
+            'habilidades' => $datosValidados['habilidades'] ?? null,
+            'enlaces_portafolio' => $datosValidados['enlaces_portafolio'] ?? null,
+            'horario_atencion' => $datosValidados['horario_atencion'] ?? null,
+            'ciudad' => $datosValidados['ciudad'] ?? null,
+            'categoria_servicio' => $datosValidados['categoria_servicio'] ?? $usuario->perfilProveedor?->categoria_servicio,
+        ];
+
+        if ($request->hasFile('foto_perfil')) {
+            $archivo = $request->file('foto_perfil');
+            $nombre = time() . '_' . preg_replace('/\s+/', '_', $archivo->getClientOriginalName());
+            $ruta = $archivo->storeAs('fotos_perfil', $nombre, 'public');
+            $datosPerfil['foto_perfil'] = '/storage/' . $ruta;
+        }
+
         // Actualizar o crear datos de la tabla 'perfiles_proveedor'
         $perfil = PerfilProveedor::updateOrCreate(
             ['usuario_id' => $usuario->id],
-            [
-                'biografia' => $datosValidados['biografia'] ?? null,
-                'anios_experiencia' => $datosValidados['anios_experiencia'] ?? 0,
-                'precio_por_hora' => $datosValidados['precio_por_hora'] ?? 0.00,
-                'habilidades' => $datosValidados['habilidades'] ?? null,
-                'enlaces_portafolio' => $datosValidados['enlaces_portafolio'] ?? null,
-                'horario_atencion' => $datosValidados['horario_atencion'] ?? null,
-                'ciudad' => $datosValidados['ciudad'] ?? null,
-                'categoria_servicio' => $datosValidados['categoria_servicio'] ?? $usuario->perfilProveedor?->categoria_servicio,
-            ]
+            $datosPerfil
         );
 
         // Volver a cargar las relaciones del usuario
