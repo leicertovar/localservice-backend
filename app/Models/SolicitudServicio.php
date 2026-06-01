@@ -27,6 +27,14 @@ class SolicitudServicio extends Model
         'estado',
         'latitud',
         'longitud',
+        'fecha_completado',
+        'marcado_pagado',
+        'confirmacion_cliente',
+        'queja_cliente',
+    ];
+
+    protected $casts = [
+        'marcado_pagado' => 'boolean',
     ];
 
     /**

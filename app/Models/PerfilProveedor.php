@@ -24,6 +24,8 @@ class PerfilProveedor extends Model
         'calificacion',
         'total_resenas',
         'url_documento',
+        'foto_perfil',
+        'nota_rechazo',
         'ciudad',
         'esta_verificado',
     ];

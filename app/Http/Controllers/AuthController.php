@@ -15,6 +15,7 @@ use App\Models\PerfilCliente;
 use App\Models\PerfilProveedor;
 use App\Mail\ProveedorRegistradoMail;
 use App\Mail\ProveedorAprobadoMail;
+use App\Mail\ProveedorRechazadoMail;
 use App\Mail\RestablecerPasswordMail;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
@@ -368,24 +369,65 @@ class AuthController extends Controller
     }
 
     /**
-     * Administrador: Rechaza la verificación de un proveedor y elimina su cuenta.
+     * Administrador: Rechaza la verificación de un proveedor, guarda nota y envía correo.
      */
-    public function rechazarProveedor($id)
+    public function rechazarProveedor(Request $request, $id)
     {
         $administrador = JWTAuth::user();
         if (!$administrador || $administrador->rol_id !== 3) {
             return response()->json(['mensaje' => 'Acceso denegado. Se requieren privilegios de administrador.'], 403);
         }
 
-        $usuario = Usuario::find($id);
+        $usuario = Usuario::with('perfilProveedor')->find($id);
         if (!$usuario) {
             return response()->json(['mensaje' => 'Usuario no encontrado.'], 404);
+        }
+
+        $nota = $request->input('nota', null);
+
+        // Guardar nota en el perfil antes de eliminar
+        if ($usuario->perfilProveedor && $nota) {
+            $usuario->perfilProveedor->update(['nota_rechazo' => $nota]);
+        }
+
+        $correoEnviado = false;
+        $errorCorreo = null;
+
+        try {
+            Mail::to($usuario->email)->send(new ProveedorRechazadoMail($usuario, $nota));
+            $correoEnviado = true;
+        } catch (\Exception $e) {
+            Log::error('Fallo al enviar correo de rechazo: ' . $e->getMessage());
+            $errorCorreo = $e->getMessage();
         }
 
         $usuario->delete();
 
         return response()->json([
-            'mensaje' => 'Solicitud de verificación rechazada y cuenta de proveedor eliminada.'
+            'mensaje' => 'Solicitud rechazada. Se notificó al proveedor por correo.',
+            'notificacion_correo' => ['enviado' => $correoEnviado, 'error' => $errorCorreo],
+        ]);
+    }
+
+    /**
+     * Administrador: Ver documento de un proveedor pendiente.
+     */
+    public function verDocumentoProveedor($id)
+    {
+        $administrador = JWTAuth::user();
+        if (!$administrador || $administrador->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado.'], 403);
+        }
+
+        $usuario = Usuario::with('perfilProveedor')->find($id);
+        if (!$usuario || !$usuario->perfilProveedor) {
+            return response()->json(['mensaje' => 'Proveedor no encontrado.'], 404);
+        }
+
+        return response()->json([
+            'url_documento' => $usuario->perfilProveedor->url_documento,
+            'nombre' => $usuario->nombre . ' ' . $usuario->apellido,
+            'categoria' => $usuario->perfilProveedor->categoria_servicio,
         ]);
     }
 
