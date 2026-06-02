@@ -31,6 +31,11 @@ class SolicitudServicio extends Model
         'marcado_pagado',
         'confirmacion_cliente',
         'queja_cliente',
+        'evidencia_cliente',
+        'evidencia_proveedor',
+        'estado_disputa',
+        'resolucion_admin',
+        'nota_admin',
     ];
 
     protected $casts = [

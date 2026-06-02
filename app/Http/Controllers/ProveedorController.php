@@ -32,7 +32,8 @@ class ProveedorController extends Controller
                 'reviews' => (int)($perfil?->total_resenas ?? 0),
                 'price' => $perfil?->precio_por_hora ? "$" . number_format($perfil->precio_por_hora, 0, ',', '.') . "/hora" : 'Precio base',
                 'location' => $perfil?->ciudad ?? 'Buenaventura',
-                'available' => true
+                'available' => true,
+                'foto_perfil' => $perfil?->foto_perfil ?? null
             ];
         });
 

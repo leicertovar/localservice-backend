@@ -53,8 +53,9 @@ Route::get('/proveedores/{id}/resenas', [ResenaController::class, 'listarResenas
 
 // Rutas protegidas para la gestión de perfil de proveedor, servicios y agenda/reservas
 Route::middleware('auth:api')->group(function () {
-    // Actualizar perfil
+    // Actualizar perfil (PUT para JSON, POST para form-data con foto)
     Route::put('/proveedor/perfil', [\App\Http\Controllers\ProveedorController::class, 'actualizarPerfilProveedor']);
+    Route::post('/proveedor/perfil', [\App\Http\Controllers\ProveedorController::class, 'actualizarPerfilProveedor']);
 
     // CRUD de servicios
     Route::get('/servicios', [\App\Http\Controllers\ServicioController::class, 'listarServicios']);
@@ -72,9 +73,13 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/solicitudes/{id}/rechazar', [\App\Http\Controllers\SolicitudServicioController::class, 'rechazarSolicitud']);
     Route::post('/solicitudes/{id}/completar', [\App\Http\Controllers\SolicitudServicioController::class, 'marcarCompletado']);
     Route::post('/solicitudes/{id}/confirmar', [\App\Http\Controllers\SolicitudServicioController::class, 'confirmarCompletado']);
+    Route::post('/solicitudes/{id}/evidencia-proveedor', [\App\Http\Controllers\SolicitudServicioController::class, 'aportarEvidenciaProveedor']);
+    Route::post('/admin/disputas/{id}/resolver', [\App\Http\Controllers\SolicitudServicioController::class, 'resolverDisputa']);
+    Route::get('/admin/disputas', [\App\Http\Controllers\SolicitudServicioController::class, 'listarDisputas']);
 
-    // Perfil del cliente
+    // Perfil del cliente (PUT para JSON, POST para form-data con foto)
     Route::put('/cliente/perfil', [ClienteController::class, 'actualizarPerfil']);
+    Route::post('/cliente/perfil', [ClienteController::class, 'actualizarPerfil']);
 
     // Notificaciones
     Route::get('/notificaciones', [NotificacionController::class, 'listar']);
@@ -92,6 +97,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/resenas/{id}/reportar', [ResenaController::class, 'reportarResena']);
     Route::get('/admin/resenas-reportadas', [ResenaController::class, 'listarReportadas']);
     Route::patch('/admin/resenas/{id}/moderar', [ResenaController::class, 'moderarResena']);
+    Route::delete('/admin/resenas/{id}', [ResenaController::class, 'eliminarResena']);
 
     // Proveedor: foto de perfil (incluida en PUT /proveedor/perfil, pero ruta dedicada si se necesita form-data)
     Route::post('/proveedor/foto-perfil', [\App\Http\Controllers\ProveedorController::class, 'actualizarPerfilProveedor']);

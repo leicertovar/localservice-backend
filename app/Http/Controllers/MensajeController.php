@@ -68,14 +68,16 @@ class MensajeController extends Controller
             $urlArchivo = '/storage/' . $ruta;
         }
 
-        if (!$datos['contenido'] && !$urlArchivo) {
+        $contenido = $datos['contenido'] ?? null;
+
+        if (!$contenido && !$urlArchivo) {
             return response()->json(['mensaje' => 'Debes enviar texto o un archivo.'], 422);
         }
 
         $mensaje = Mensaje::create([
             'emisor_id' => $usuario->id,
             'receptor_id' => $datos['receptor_id'],
-            'contenido' => $datos['contenido'] ?? null,
+            'contenido' => $contenido,
             'tipo' => $tipo,
             'url_archivo' => $urlArchivo,
             'nombre_archivo' => $nombreArchivo,
@@ -86,7 +88,7 @@ class MensajeController extends Controller
             $datos['receptor_id'],
             'mensaje',
             'Nuevo mensaje',
-            "{$usuario->nombre}: " . ($datos['contenido'] ? substr($datos['contenido'], 0, 80) : "📎 Archivo adjunto")
+            "{$usuario->nombre}: " . ($contenido ? substr($contenido, 0, 80) : "📎 Archivo adjunto")
         );
 
         return response()->json($mensaje->load('emisor:id,nombre,apellido'), 201);

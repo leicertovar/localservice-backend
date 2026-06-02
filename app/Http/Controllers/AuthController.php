@@ -36,9 +36,11 @@ class AuthController extends Controller
             'telefono' => 'nullable|string|unique:usuarios,telefono',
             'password' => 'required|string|min:8|confirmed',
             'rol' => 'nullable|in:cliente,proveedor,admin',
-            // Reglas obligatorias para Proveedor (solo categoría de servicio y el documento de soporte)
+            // Reglas obligatorias para Proveedor
             'categoria_servicio' => 'required_if:rol,proveedor|string|max:255',
-            'documento' => 'required_if:rol,proveedor|file|mimes:pdf,jpg,png,jpeg|max:10240', // Requerido para verificación comercial
+            'doc_cedula'  => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            'doc_rut'     => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            'doc_diploma' => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
         ]);
 
         // 2. Mapear el rol del formato string recibido al ID numérico relacional
@@ -66,20 +68,21 @@ class AuthController extends Controller
             'esta_aprobado' => $estaAprobado,
         ]);
 
-        $rutaDocumento = null;
         $correoEnviado = false;
         $errorCorreo = null;
 
         // 5. Estructurar y guardar los perfiles adicionales específicos del rol
         if ($nombreRol === 'proveedor') {
-            // Manejar y almacenar de manera segura el archivo de validación cargado
-            if ($request->hasFile('documento')) {
-                $archivo = $request->file('documento');
-                $nombreArchivo = time() . '_' . preg_replace('/\s+/', '_', $archivo->getClientOriginalName());
-                $rutaDocumento = $archivo->storeAs('documentos', $nombreArchivo, 'public');
-            }
+            $guardarDoc = function (string $campo) use ($request) {
+                if ($request->hasFile($campo)) {
+                    $archivo = $request->file($campo);
+                    $nombre = time() . '_' . $campo . '_' . preg_replace('/\s+/', '_', $archivo->getClientOriginalName());
+                    $ruta = $archivo->storeAs('documentos', $nombre, 'public');
+                    return '/storage/' . $ruta;
+                }
+                return null;
+            };
 
-            // Crear el Perfil de Proveedor con los datos básicos iniciales (los demás campos se completan en la edición de perfil)
             PerfilProveedor::create([
                 'usuario_id' => $usuario->id,
                 'categoria_servicio' => $datosValidados['categoria_servicio'],
@@ -88,7 +91,9 @@ class AuthController extends Controller
                 'precio_por_hora' => $request->input('precio_por_hora', 0.00),
                 'habilidades' => $request->input('habilidades'),
                 'horario_atencion' => $request->input('horario_atencion'),
-                'url_documento' => $rutaDocumento ? '/storage/' . $rutaDocumento : null,
+                'doc_cedula'  => $guardarDoc('doc_cedula'),
+                'doc_rut'     => $guardarDoc('doc_rut'),
+                'doc_diploma' => $guardarDoc('doc_diploma'),
                 'esta_verificado' => false,
             ]);
 
@@ -424,10 +429,14 @@ class AuthController extends Controller
             return response()->json(['mensaje' => 'Proveedor no encontrado.'], 404);
         }
 
+        $p = $usuario->perfilProveedor;
         return response()->json([
-            'url_documento' => $usuario->perfilProveedor->url_documento,
             'nombre' => $usuario->nombre . ' ' . $usuario->apellido,
-            'categoria' => $usuario->perfilProveedor->categoria_servicio,
+            'email' => $usuario->email,
+            'categoria' => $p->categoria_servicio,
+            'doc_cedula'  => $p->doc_cedula,
+            'doc_rut'     => $p->doc_rut,
+            'doc_diploma' => $p->doc_diploma,
         ]);
     }
 
