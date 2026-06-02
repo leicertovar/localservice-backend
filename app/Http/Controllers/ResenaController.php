@@ -177,6 +177,28 @@ class ResenaController extends Controller
     }
 
     /**
+     * Admin: elimina definitivamente una reseña reportada.
+     */
+    public function eliminarResena($id)
+    {
+        $admin = JWTAuth::user();
+        if (!$admin || $admin->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado.'], 403);
+        }
+
+        $resena = Resena::find($id);
+        if (!$resena) {
+            return response()->json(['mensaje' => 'Reseña no encontrada.'], 404);
+        }
+
+        $proveedorId = $resena->proveedor_id;
+        $resena->delete();
+        $this->recalcularCalificacion($proveedorId);
+
+        return response()->json(['mensaje' => 'Reseña eliminada definitivamente.']);
+    }
+
+    /**
      * Recalcula la calificación promedio del proveedor.
      */
     private function recalcularCalificacion(string $proveedorId): void

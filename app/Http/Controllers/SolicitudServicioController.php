@@ -278,6 +278,17 @@ class SolicitudServicioController extends Controller
             return response()->json(['mensaje' => 'Solicitud no encontrada o no está aceptada.'], 404);
         }
 
+        // No permitir marcar como completado antes de la fecha acordada
+        if ($solicitud->fecha) {
+            $fechaAcordada = Carbon::parse($solicitud->fecha)->toDateString();
+            $hoy = Carbon::now()->toDateString();
+            if ($hoy < $fechaAcordada) {
+                return response()->json([
+                    'mensaje' => 'No puedes marcar el servicio como completado antes de la fecha acordada (' . Carbon::parse($solicitud->fecha)->format('d/m/Y') . ').'
+                ], 422);
+            }
+        }
+
         $solicitud->update([
             'estado' => 'completada',
             'fecha_completado' => Carbon::now(),
@@ -297,6 +308,7 @@ class SolicitudServicioController extends Controller
 
     /**
      * El cliente confirma o rechaza la completitud del servicio.
+     * Si rechaza, puede adjuntar evidencia (foto/archivo) y un motivo.
      */
     public function confirmarCompletado(Request $request, $id)
     {
@@ -316,39 +328,181 @@ class SolicitudServicioController extends Controller
         }
 
         $datos = $request->validate([
-            'accion' => 'required|in:aceptar,rechazar',
-            'queja' => 'nullable|string|max:1000',
+            'accion'    => 'required|in:aceptar,rechazar',
+            'queja'     => 'nullable|string|max:1000',
+            'evidencia' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:10240',
         ]);
 
-        $solicitud->update([
-            'confirmacion_cliente' => $datos['accion'] === 'aceptar' ? 'aceptado' : 'rechazado',
-            'queja_cliente' => $datos['queja'] ?? null,
-        ]);
+        $urlEvidencia = null;
+        if ($request->hasFile('evidencia')) {
+            $archivo = $request->file('evidencia');
+            $nombre = time() . '_ev_cliente_' . preg_replace('/\s+/', '_', $archivo->getClientOriginalName());
+            $ruta = $archivo->storeAs('disputas', $nombre, 'public');
+            $urlEvidencia = '/storage/' . $ruta;
+        }
 
-        if ($datos['accion'] === 'rechazar') {
+        if ($datos['accion'] === 'aceptar') {
+            $solicitud->update([
+                'confirmacion_cliente' => 'aceptado',
+            ]);
+
+            Notificacion::crear(
+                $solicitud->proveedor_id,
+                'pago',
+                'Servicio confirmado',
+                "{$cliente->nombre} confirmó el servicio completado. ¡El pago queda registrado!"
+            );
+        } else {
+            // Rechazar: abrir disputa
+            $solicitud->update([
+                'confirmacion_cliente' => 'rechazado',
+                'queja_cliente'        => $datos['queja'] ?? null,
+                'evidencia_cliente'    => $urlEvidencia,
+                'estado_disputa'       => 'pendiente_proveedor',
+            ]);
+
+            // Notificar al proveedor para que aporte su evidencia
+            Notificacion::crear(
+                $solicitud->proveedor_id,
+                'sistema',
+                'Disputa abierta',
+                "{$cliente->nombre} rechazó el servicio. Motivo: " . ($datos['queja'] ?? 'Sin descripción') . ". Tienes 48h para aportar tu evidencia."
+            );
+
             // Notificar al admin
             $admins = \App\Models\Usuario::where('rol_id', 3)->get();
             foreach ($admins as $admin) {
                 Notificacion::crear(
                     $admin->id,
                     'sistema',
-                    'Queja de cliente',
-                    "El cliente {$cliente->nombre} rechazó el servicio completado. Queja: " . ($datos['queja'] ?? 'Sin descripción')
+                    'Disputa de servicio',
+                    "El cliente {$cliente->nombre} reportó que el proveedor intenta confirmar un trabajo incompleto. Solicitud #{$solicitud->id}."
                 );
             }
         }
 
+        return response()->json(['mensaje' => 'Confirmación registrada.', 'solicitud' => $solicitud->fresh()]);
+    }
+
+    /**
+     * El proveedor aporta evidencia en una disputa activa.
+     */
+    public function aportarEvidenciaProveedor(Request $request, $id)
+    {
+        $proveedor = JWTAuth::user();
+
+        if (!$proveedor || $proveedor->rol_id !== 2) {
+            return response()->json(['mensaje' => 'No autorizado.'], 401);
+        }
+
+        $solicitud = SolicitudServicio::where('id', $id)
+            ->where('proveedor_id', $proveedor->id)
+            ->where('estado_disputa', 'pendiente_proveedor')
+            ->first();
+
+        if (!$solicitud) {
+            return response()->json(['mensaje' => 'Disputa no encontrada o ya respondida.'], 404);
+        }
+
+        $datos = $request->validate([
+            'descripcion' => 'required|string|max:2000',
+            'evidencia'   => 'required|file|mimes:jpg,jpeg,png,pdf|max:10240',
+        ]);
+
+        $archivo = $request->file('evidencia');
+        $nombre = time() . '_ev_proveedor_' . preg_replace('/\s+/', '_', $archivo->getClientOriginalName());
+        $ruta = $archivo->storeAs('disputas', $nombre, 'public');
+
+        $solicitud->update([
+            'evidencia_proveedor' => '/storage/' . $ruta,
+            'queja_cliente'       => $solicitud->queja_cliente . "\n\n[Proveedor] " . $datos['descripcion'],
+            'estado_disputa'      => 'pendiente_admin',
+        ]);
+
+        // Notificar al admin para que tome la decisión final
+        $admins = \App\Models\Usuario::where('rol_id', 3)->get();
+        foreach ($admins as $admin) {
+            Notificacion::crear(
+                $admin->id,
+                'sistema',
+                'Disputa lista para resolver',
+                "El proveedor {$proveedor->nombre} aportó evidencia en la disputa #{$solicitud->id}. Requiere tu decisión final."
+            );
+        }
+
+        return response()->json(['mensaje' => 'Evidencia enviada. El admin tomará la decisión final.', 'solicitud' => $solicitud->fresh()]);
+    }
+
+    /**
+     * Admin resuelve una disputa, aprobando o rechazando el trabajo del proveedor.
+     */
+    public function resolverDisputa(Request $request, $id)
+    {
+        $admin = JWTAuth::user();
+
+        if (!$admin || $admin->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado.'], 403);
+        }
+
+        $solicitud = SolicitudServicio::where('id', $id)
+            ->where('estado_disputa', 'pendiente_admin')
+            ->first();
+
+        if (!$solicitud) {
+            return response()->json(['mensaje' => 'Disputa no encontrada o ya resuelta.'], 404);
+        }
+
+        $datos = $request->validate([
+            'resolucion' => 'required|in:aprobado,rechazado',
+            'nota'       => 'nullable|string|max:1000',
+        ]);
+
+        $solicitud->update([
+            'resolucion_admin' => $datos['resolucion'],
+            'nota_admin'       => $datos['nota'] ?? null,
+            'estado_disputa'   => 'resuelto',
+            'confirmacion_cliente' => $datos['resolucion'] === 'aprobado' ? 'aceptado' : 'rechazado',
+        ]);
+
         // Notificar al proveedor
         Notificacion::crear(
             $solicitud->proveedor_id,
-            'pago',
-            $datos['accion'] === 'aceptar' ? 'Servicio confirmado' : 'Servicio disputado',
-            $datos['accion'] === 'aceptar'
-                ? "{$cliente->nombre} confirmó el servicio completado."
-                : "{$cliente->nombre} rechazó el servicio. Queja: " . ($datos['queja'] ?? 'Sin descripción')
+            'sistema',
+            $datos['resolucion'] === 'aprobado' ? 'Disputa resuelta a tu favor' : 'Disputa resuelta en contra',
+            $datos['resolucion'] === 'aprobado'
+                ? "El administrador aprobó el trabajo. El pago queda confirmado. " . ($datos['nota'] ?? '')
+                : "El administrador determinó que el trabajo no fue completado correctamente. " . ($datos['nota'] ?? '')
         );
 
-        return response()->json(['mensaje' => 'Confirmación registrada.', 'solicitud' => $solicitud]);
+        // Notificar al cliente
+        Notificacion::crear(
+            $solicitud->cliente_id,
+            'sistema',
+            'Resolución de disputa',
+            $datos['resolucion'] === 'aprobado'
+                ? "El administrador revisó la evidencia y aprobó el trabajo del proveedor. " . ($datos['nota'] ?? '')
+                : "El administrador revisó la evidencia y determinó que el trabajo fue insatisfactorio. " . ($datos['nota'] ?? '')
+        );
+
+        return response()->json(['mensaje' => 'Disputa resuelta correctamente.', 'solicitud' => $solicitud->fresh()]);
+    }
+
+    /**
+     * Admin: lista todas las disputas activas.
+     */
+    public function listarDisputas()
+    {
+        $admin = JWTAuth::user();
+        if (!$admin || $admin->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado.'], 403);
+        }
+
+        $disputas = SolicitudServicio::whereIn('estado_disputa', ['pendiente_proveedor', 'pendiente_admin'])
+            ->with(['cliente:id,nombre,apellido', 'proveedor:id,nombre,apellido', 'servicio:id,nombre'])
+            ->orderBy('updated_at', 'desc')
+            ->get();
+
+        return response()->json($disputas);
     }
 
     /**
