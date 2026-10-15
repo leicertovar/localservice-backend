@@ -26,6 +26,14 @@ Route::group([
     Route::post('/recuperar-password',   [AuthController::class, 'solicitarRecuperacionPassword']);
     Route::post('/restablecer-password', [AuthController::class, 'restablecerPassword']);
 
+    // Recuperación con código de 6 dígitos (app móvil). Cada ruta tiene su propio contador por IP
+    // (el tercer parámetro de throttle es el prefijo): 3 envíos y 10 verificaciones por minuto.
+    // Además, cada código admite solo 5 intentos (ver AuthController::MAX_INTENTOS_CODIGO).
+    Route::post('/recuperar-password/codigo', [AuthController::class, 'solicitarCodigoRecuperacion'])
+        ->middleware('throttle:3,1,recuperar-codigo');
+    Route::post('/recuperar-password/verificar-codigo', [AuthController::class, 'verificarCodigoRecuperacion'])
+        ->middleware('throttle:10,1,verificar-codigo');
+
     // Rutas protegidas bajo el middleware de JWT (auth:api)
     Route::middleware('auth:api')->group(function () {
 

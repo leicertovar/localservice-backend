@@ -17,6 +17,7 @@ use App\Mail\ProveedorRegistradoMail;
 use App\Mail\ProveedorAprobadoMail;
 use App\Mail\ProveedorRechazadoMail;
 use App\Mail\RestablecerPasswordMail;
+use App\Mail\CodigoRecuperacionMail;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
 
@@ -35,7 +36,8 @@ class AuthController extends Controller
             'email' => 'required|email|unique:usuarios,email',
             'telefono' => 'nullable|string|unique:usuarios,telefono',
             'password' => 'required|string|min:8|confirmed',
-            'rol' => 'nullable|in:cliente,proveedor,admin',
+            // Solo cliente o proveedor: los administradores no se crean desde el registro público
+            'rol' => 'nullable|in:cliente,proveedor',
             // Reglas obligatorias para Proveedor
             'categoria_servicio' => 'required_if:rol,proveedor|string|max:255',
             'doc_cedula'  => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
@@ -518,6 +520,124 @@ class AuthController extends Controller
                 'enviado' => $correoEnviado,
                 'error' => $errorCorreo
             ]
+        ]);
+    }
+
+    /** Minutos de validez del código de recuperación (app móvil). */
+    private const MINUTOS_VALIDEZ_CODIGO = 15;
+
+    /** Intentos fallidos permitidos antes de invalidar el código. */
+    private const MAX_INTENTOS_CODIGO = 5;
+
+    /**
+     * App móvil: envía un código de 6 dígitos al correo para recuperar la contraseña.
+     * Responde lo mismo exista o no la cuenta, para no revelar qué correos están registrados.
+     */
+    public function solicitarCodigoRecuperacion(Request $request)
+    {
+        $datosValidados = $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $email = $datosValidados['email'];
+        $respuesta = [
+            'mensaje' => 'Si el correo está registrado, te enviamos un código de verificación.',
+            'minutos_validez' => self::MINUTOS_VALIDEZ_CODIGO,
+        ];
+
+        $usuario = Usuario::where('email', $email)->first();
+        if (!$usuario) {
+            return response()->json($respuesta);
+        }
+
+        // 1. Generar el código y guardarlo cifrado (reemplaza cualquier código anterior)
+        $codigo = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        DB::table('codigos_recuperacion')->updateOrInsert(
+            ['email' => $email],
+            [
+                'codigo' => Hash::make($codigo),
+                'intentos' => 0,
+                'created_at' => Carbon::now(),
+            ]
+        );
+
+        // 2. Enviar el correo con el código
+        try {
+            Mail::to($email)->send(new CodigoRecuperacionMail($usuario, $codigo, self::MINUTOS_VALIDEZ_CODIGO));
+        } catch (\Exception $e) {
+            Log::error('Fallo al enviar el código de recuperación SMTP: ' . $e->getMessage());
+            DB::table('codigos_recuperacion')->where('email', $email)->delete();
+
+            return response()->json([
+                'mensaje' => 'No pudimos enviar el correo en este momento. Inténtalo de nuevo más tarde.',
+            ], 503);
+        }
+
+        return response()->json($respuesta);
+    }
+
+    /**
+     * App móvil: valida el código de recuperación.
+     * Si es correcto, devuelve un token de un solo uso para /auth/restablecer-password.
+     */
+    public function verificarCodigoRecuperacion(Request $request)
+    {
+        $datosValidados = $request->validate([
+            'email' => 'required|email',
+            'codigo' => 'required|digits:6',
+        ]);
+
+        $email = $datosValidados['email'];
+        $registro = DB::table('codigos_recuperacion')->where('email', $email)->first();
+
+        // 1. Debe existir un código vigente
+        $expirado = $registro
+            && Carbon::parse($registro->created_at)->addMinutes(self::MINUTOS_VALIDEZ_CODIGO)->isPast();
+
+        if (!$registro || $expirado) {
+            DB::table('codigos_recuperacion')->where('email', $email)->delete();
+            return response()->json([
+                'mensaje' => 'El código expiró o no es válido. Solicita uno nuevo.',
+                'codigo_expirado' => true,
+            ], 400);
+        }
+
+        // 2. Comparar el código; cada fallo consume un intento
+        if (!Hash::check($datosValidados['codigo'], $registro->codigo)) {
+            $intentos = $registro->intentos + 1;
+            $restantes = self::MAX_INTENTOS_CODIGO - $intentos;
+
+            if ($restantes <= 0) {
+                DB::table('codigos_recuperacion')->where('email', $email)->delete();
+                return response()->json([
+                    'mensaje' => 'Superaste el número de intentos. Solicita un código nuevo.',
+                    'codigo_expirado' => true,
+                ], 400);
+            }
+
+            DB::table('codigos_recuperacion')->where('email', $email)->update(['intentos' => $intentos]);
+            return response()->json([
+                'mensaje' => 'El código es incorrecto.',
+                'intentos_restantes' => $restantes,
+            ], 400);
+        }
+
+        // 3. Código correcto: se consume y se emite el token que usa restablecerPassword()
+        DB::table('codigos_recuperacion')->where('email', $email)->delete();
+
+        $token = Str::random(60);
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $email],
+            [
+                'token' => Hash::make($token),
+                'created_at' => Carbon::now(),
+            ]
+        );
+
+        return response()->json([
+            'mensaje' => 'Código verificado. Ya puedes crear tu nueva contraseña.',
+            'token' => $token,
         ]);
     }
 
