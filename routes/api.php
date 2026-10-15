@@ -22,6 +22,8 @@ Route::group([
     // Rutas de registro y acceso públicas
     Route::post('/registro',             [AuthController::class, 'registrar'])->name('auth.registro');
     Route::post('/login',                [AuthController::class, 'iniciarSesion'])->name('auth.login');
+    Route::post('/google',               [AuthController::class, 'iniciarSesionGoogle'])
+        ->middleware('throttle:10,1,login-google');
     Route::post('/refrescar',            [AuthController::class, 'refrescarToken'])->name('auth.refrescar');
     Route::post('/recuperar-password',   [AuthController::class, 'solicitarRecuperacionPassword']);
     Route::post('/restablecer-password', [AuthController::class, 'restablecerPassword']);

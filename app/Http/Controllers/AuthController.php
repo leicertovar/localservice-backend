@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Support\Carbon;
 use App\Models\Usuario;
@@ -191,6 +192,93 @@ class AuthController extends Controller
             'token_acceso' => $token,
             'tipo_token' => 'bearer',
         ]);
+    }
+
+    /**
+     * App móvil: inicio de sesión con Google.
+     * Recibe el idToken del plugin nativo, lo valida con Google y devuelve el JWT de LocalService.
+     * Si el correo no tiene cuenta, se crea una de cliente aprobada.
+     */
+    public function iniciarSesionGoogle(Request $request)
+    {
+        $datosValidados = $request->validate([
+            'id_token' => 'required|string',
+        ]);
+
+        $clienteId = config('services.google.client_id');
+        if (!$clienteId) {
+            Log::error('GOOGLE_CLIENT_ID no está configurado en el .env del backend.');
+            return response()->json(['mensaje' => 'El inicio de sesión con Google no está disponible.'], 503);
+        }
+
+        // 1. Validar el token con Google (firma y vigencia); luego audiencia, emisor y correo
+        try {
+            $respuesta = Http::timeout(10)->get('https://oauth2.googleapis.com/tokeninfo', [
+                'id_token' => $datosValidados['id_token'],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('No se pudo contactar a Google para validar el idToken: ' . $e->getMessage());
+            return response()->json(['mensaje' => 'No pudimos contactar a Google. Inténtalo de nuevo.'], 503);
+        }
+
+        $datosGoogle = $respuesta->json();
+        $tokenValido = $respuesta->successful()
+            && ($datosGoogle['aud'] ?? null) === $clienteId
+            && in_array($datosGoogle['iss'] ?? null, ['accounts.google.com', 'https://accounts.google.com'], true)
+            && ($datosGoogle['email_verified'] ?? null) === 'true'
+            && !empty($datosGoogle['email']);
+
+        if (!$tokenValido) {
+            return response()->json(['mensaje' => 'La sesión de Google no es válida. Inténtalo de nuevo.'], 401);
+        }
+
+        // 2. Buscar la cuenta por correo o crear una de cliente
+        $email = strtolower($datosGoogle['email']);
+        $usuario = Usuario::whereRaw('LOWER(email) = ?', [$email])->first();
+        $cuentaNueva = false;
+
+        if (!$usuario) {
+            $usuario = DB::transaction(function () use ($datosGoogle, $email) {
+                $nuevo = Usuario::create([
+                    'nombre' => $datosGoogle['given_name'] ?? ($datosGoogle['name'] ?? 'Usuario'),
+                    'apellido' => $datosGoogle['family_name'] ?? null,
+                    'email' => $email,
+                    // Contraseña aleatoria: podrá definir una propia con "¿Olvidaste tu contraseña?"
+                    'password' => Hash::make(Str::random(40)),
+                    'rol_id' => 1, // Cliente
+                    'esta_aprobado' => true,
+                ]);
+
+                PerfilCliente::create(['usuario_id' => $nuevo->id]);
+
+                return $nuevo;
+            });
+            $cuentaNueva = true;
+        }
+
+        // 3. Mismo control de acceso que el login con contraseña
+        if (!$usuario->esta_aprobado) {
+            return response()->json([
+                'mensaje' => 'Su cuenta aún no ha sido aprobada por el administrador. Por favor, espere la verificación de sus documentos.'
+            ], 403);
+        }
+
+        $token = JWTAuth::fromUser($usuario);
+        $usuario->load('rol');
+
+        return response()->json([
+            'mensaje' => $cuentaNueva ? 'Cuenta creada con Google.' : 'Inicio de sesión exitoso.',
+            'cuenta_nueva' => $cuentaNueva,
+            'usuario' => [
+                'id' => $usuario->id,
+                'nombre' => $usuario->nombre,
+                'email' => $usuario->email,
+                'rol' => $usuario->rol ? $usuario->rol->nombre : null,
+                'esta_aprobado' => $usuario->esta_aprobado,
+            ],
+            'token_acceso' => $token,
+            'tipo_token' => 'bearer',
+        ], $cuentaNueva ? 201 : 200);
     }
 
     /**
