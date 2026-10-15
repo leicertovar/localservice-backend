@@ -16,8 +16,9 @@ class ProveedorController extends Controller
      */
     public function listarProveedores()
     {
-        // Obtener todos los usuarios con rol de proveedor (rol_id = 2) y su perfil
+        // Obtener los proveedores (rol_id = 2) aprobados por el administrador, con su perfil
         $proveedores = Usuario::where('rol_id', 2)
+            ->where('esta_aprobado', true)
             ->with('perfilProveedor')
             ->get();
 
@@ -33,7 +34,11 @@ class ProveedorController extends Controller
                 'price' => $perfil?->precio_por_hora ? "$" . number_format($perfil->precio_por_hora, 0, ',', '.') . "/hora" : 'Precio base',
                 'location' => $perfil?->ciudad ?? 'Buenaventura',
                 'available' => true,
-                'foto_perfil' => $perfil?->foto_perfil ?? null
+                'foto_perfil' => $perfil?->foto_perfil ?? null,
+                // Campos numéricos para la app móvil (filtros y tarjetas)
+                'precio_por_hora' => (float)($perfil?->precio_por_hora ?? 0),
+                'anios_experiencia' => (int)($perfil?->anios_experiencia ?? 0),
+                'esta_verificado' => (bool)($perfil?->esta_verificado ?? false),
             ];
         });
 
@@ -62,6 +67,11 @@ class ProveedorController extends Controller
         $servicios = $proveedor->id ? \App\Models\Servicio::where('usuario_id', $proveedor->id)
             ->where('esta_activo', true)
             ->get() : [];
+
+        // Ruta pública: nunca exponer los documentos de identidad ni la nota de rechazo
+        $proveedor->perfilProveedor?->makeHidden([
+            'doc_cedula', 'doc_rut', 'doc_diploma', 'url_documento', 'nota_rechazo',
+        ]);
 
         return response()->json([
             'id' => $proveedor->id,
