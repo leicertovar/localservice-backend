@@ -177,11 +177,15 @@ class AuthController extends Controller
             ], 403);
         }
 
-        // 4. Cargar relación de rol para anexar detalles informativos en la respuesta
+        // 4. Si el usuario había desactivado su cuenta, iniciar sesión la reactiva
+        $cuentaReactivada = $this->reactivarSiEstaDesactivada($usuario);
+
+        // 5. Cargar relación de rol para anexar detalles informativos en la respuesta
         $usuario->load('rol');
 
         return response()->json([
             'mensaje' => 'Inicio de sesión exitoso.',
+            'cuenta_reactivada' => $cuentaReactivada,
             'usuario' => [
                 'id' => $usuario->id,
                 'nombre' => $usuario->nombre,
@@ -263,12 +267,14 @@ class AuthController extends Controller
             ], 403);
         }
 
+        $cuentaReactivada = $this->reactivarSiEstaDesactivada($usuario);
         $token = JWTAuth::fromUser($usuario);
         $usuario->load('rol');
 
         return response()->json([
             'mensaje' => $cuentaNueva ? 'Cuenta creada con Google.' : 'Inicio de sesión exitoso.',
             'cuenta_nueva' => $cuentaNueva,
+            'cuenta_reactivada' => $cuentaReactivada,
             'usuario' => [
                 'id' => $usuario->id,
                 'nombre' => $usuario->nombre,
@@ -776,5 +782,18 @@ class AuthController extends Controller
         return response()->json([
             'mensaje' => 'Su contraseña ha sido restablecida con éxito. Ya puede iniciar sesión.'
         ]);
+    }
+
+    /**
+     * Reactiva una cuenta que su dueño había desactivado (ver CuentaController).
+     */
+    private function reactivarSiEstaDesactivada(Usuario $usuario): bool
+    {
+        if (!$usuario->desactivado_en) {
+            return false;
+        }
+        $usuario->desactivado_en = null;
+        $usuario->save();
+        return true;
     }
 }

@@ -6,6 +6,7 @@ use App\Http\Controllers\ResenaController;
 use App\Http\Controllers\NotificacionController;
 use App\Http\Controllers\MensajeController;
 use App\Http\Controllers\ClienteController;
+use App\Http\Controllers\CuentaController;
 
 // Ruta básica para verificar el funcionamiento de la API
 Route::get('/prueba', function () {
@@ -42,6 +43,11 @@ Route::group([
         // Rutas de sesión del usuario
         Route::post('/cerrar-sesion', [AuthController::class, 'cerrarSesion']);
         Route::get('/mi-perfil',      [AuthController::class, 'obtenerUsuarioAutenticado']);
+
+        // Gestión de la propia cuenta (app móvil)
+        Route::post('/cambiar-password',   [CuentaController::class, 'cambiarPassword'])->middleware('throttle:10,1,cambiar-password');
+        Route::post('/desactivar-cuenta',  [CuentaController::class, 'desactivarCuenta'])->middleware('throttle:10,1,cuenta');
+        Route::delete('/mi-cuenta',        [CuentaController::class, 'eliminarCuenta'])->middleware('throttle:10,1,cuenta');
 
         // Rutas Administrativas de control de calidad y aprobación
         Route::get('/admin/proveedores-pendientes',  [AuthController::class, 'obtenerProveedoresPendientes']);
