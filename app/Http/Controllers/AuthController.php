@@ -44,6 +44,11 @@ class AuthController extends Controller
             'doc_cedula'  => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
             'doc_rut'     => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
             'doc_diploma' => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            // Zona de cobertura del proveedor (app móvil; opcional para el registro web)
+            'ciudad' => 'nullable|string|max:255',
+            'radio_cobertura_km' => 'nullable|integer|min:1|max:100',
+            'barrios_cobertura' => 'nullable|array|max:30',
+            'barrios_cobertura.*' => 'string|max:100',
         ]);
 
         // 2. Mapear el rol del formato string recibido al ID numérico relacional
@@ -94,6 +99,9 @@ class AuthController extends Controller
                 'precio_por_hora' => $request->input('precio_por_hora', 0.00),
                 'habilidades' => $request->input('habilidades'),
                 'horario_atencion' => $request->input('horario_atencion'),
+                'ciudad' => $datosValidados['ciudad'] ?? null,
+                'radio_cobertura_km' => $datosValidados['radio_cobertura_km'] ?? null,
+                'barrios_cobertura' => $datosValidados['barrios_cobertura'] ?? null,
                 'doc_cedula'  => $guardarDoc('doc_cedula'),
                 'doc_rut'     => $guardarDoc('doc_rut'),
                 'doc_diploma' => $guardarDoc('doc_diploma'),
