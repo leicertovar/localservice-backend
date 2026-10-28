@@ -21,7 +21,7 @@
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
         }
         .header {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            background: #132651;
             padding: 40px 20px;
             text-align: center;
             color: #ffffff;
@@ -123,7 +123,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>LocalService</h1>
+            <img src="{{ isset($message) ? $message->embed(public_path('brand/logo-correo.png')) : asset('brand/logo-correo.png') }}" alt="LocalService" width="220" style="display:block; margin:0 auto; border:0; height:auto;">
             <p>Tu plataforma de servicios locales de confianza</p>
         </div>
         <div class="content">

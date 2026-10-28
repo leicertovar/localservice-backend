@@ -6,10 +6,10 @@
     <style>
         body { font-family: 'Inter', 'Segoe UI', Verdana, sans-serif; background-color: #f3f4f6; margin: 0; padding: 0; }
         .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); }
-        .header { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); padding: 40px 20px; text-align: center; color: #fff; }
-        .header h1 { margin: 0; font-size: 26px; font-weight: 700; }
+        .header { background: #132651; padding: 40px 20px; text-align: center; color: #fff; }
+        .header h1 { margin: 20px 0 0; font-size: 26px; font-weight: 700; }
         .content { padding: 40px 30px; color: #1f2937; line-height: 1.7; }
-        .info-box { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 12px; padding: 20px; margin: 20px 0; }
+        .info-box { background: #e8f0fe; border: 1px solid #bfd6fb; border-radius: 12px; padding: 20px; margin: 20px 0; }
         .info-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
         .info-label { color: #6b7280; }
         .info-value { font-weight: 600; color: #1f2937; }
@@ -19,6 +19,7 @@
 <body>
     <div class="container">
         <div class="header">
+            <img src="{{ isset($message) ? $message->embed(public_path('brand/logo-correo.png')) : asset('brand/logo-correo.png') }}" alt="LocalService" width="220" style="display:block; margin:0 auto; border:0; height:auto;">
             <h1>🔔 Recordatorio de Servicio</h1>
             <p style="margin: 8px 0 0; opacity: 0.9;">Tienes un servicio programado para mañana</p>
         </div>

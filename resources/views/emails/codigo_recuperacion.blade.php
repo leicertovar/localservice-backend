@@ -21,7 +21,7 @@
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
         }
         .header {
-            background: linear-gradient(135deg, #1b6ef3 0%, #1a2b5f 100%);
+            background: #132651;
             padding: 40px 20px;
             text-align: center;
             color: #ffffff;
@@ -55,7 +55,7 @@
         .code span {
             display: inline-block;
             background-color: #e8f0fe;
-            color: #1b6ef3;
+            color: #1a75ee;
             font-size: 36px;
             font-weight: 700;
             letter-spacing: 12px;
@@ -85,7 +85,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>LocalService</h1>
+            <img src="{{ isset($message) ? $message->embed(public_path('brand/logo-correo.png')) : asset('brand/logo-correo.png') }}" alt="LocalService" width="220" style="display:block; margin:0 auto; border:0; height:auto;">
             <p>Recuperación de contraseña</p>
         </div>
         <div class="content">
