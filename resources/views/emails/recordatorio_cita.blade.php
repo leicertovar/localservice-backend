@@ -19,7 +19,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <img src="{{ isset($message) ? $message->embed(public_path('brand/logo-correo.png')) : asset('brand/logo-correo.png') }}" alt="LocalService" width="220" style="display:block; margin:0 auto; border:0; height:auto;">
+            @include('emails.partials.logo')
             <h1>🔔 Recordatorio de Servicio</h1>
             <p style="margin: 8px 0 0; opacity: 0.9;">Tienes un servicio programado para mañana</p>
         </div>

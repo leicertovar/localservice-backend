@@ -503,7 +503,7 @@ class AuthController extends Controller
         $errorCorreo = null;
 
         try {
-            Mail::to($usuario->email)->send(new ProveedorRechazadoMail($usuario, $nota));
+            Mail::to($usuario->email)->send(new ProveedorRechazadoMail($usuario->nombre, $nota));
             $correoEnviado = true;
         } catch (\Exception $e) {
             Log::error('Fallo al enviar correo de rechazo: ' . $e->getMessage());
