@@ -53,6 +53,9 @@ class ServicioController extends Controller
             'categoria' => 'required|string|max:255',
             'precio' => 'required|string|max:255',
             'descripcion' => 'nullable|string',
+            // Campos de la app móvil; el panel web aún no los envía
+            'zona' => 'nullable|string|max:255',
+            'tipo_cobro' => 'nullable|in:fijo,hora',
         ]);
 
         // Crear servicio
@@ -62,6 +65,8 @@ class ServicioController extends Controller
             'categoria' => $datosValidados['categoria'],
             'precio' => $datosValidados['precio'],
             'descripcion' => $datosValidados['descripcion'] ?? null,
+            'zona' => $datosValidados['zona'] ?? null,
+            'tipo_cobro' => $datosValidados['tipo_cobro'] ?? 'fijo',
             'esta_activo' => true
         ]);
 
@@ -104,6 +109,9 @@ class ServicioController extends Controller
             'categoria' => 'required|string|max:255',
             'precio' => 'required|string|max:255',
             'descripcion' => 'nullable|string',
+            // Campos de la app móvil; el panel web aún no los envía
+            'zona' => 'nullable|string|max:255',
+            'tipo_cobro' => 'nullable|in:fijo,hora',
         ]);
 
         // Actualizar el servicio
@@ -113,6 +121,15 @@ class ServicioController extends Controller
             'precio' => $datosValidados['precio'],
             'descripcion' => $datosValidados['descripcion'] ?? null,
         ]);
+
+        // Solo si se envían: así una edición desde el panel web no borra la zona ni el cobro
+        if ($request->has('zona')) {
+            $servicio->zona = $datosValidados['zona'] ?? null;
+        }
+        if ($request->has('tipo_cobro')) {
+            $servicio->tipo_cobro = $datosValidados['tipo_cobro'] ?? 'fijo';
+        }
+        $servicio->save();
 
         return response()->json([
             'mensaje' => 'Servicio actualizado con éxito.',

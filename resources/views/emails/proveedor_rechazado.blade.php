@@ -7,7 +7,7 @@
     <style>
         body { font-family: 'Inter', 'Segoe UI', Geneva, Verdana, sans-serif; background-color: #f3f4f6; margin: 0; padding: 0; }
         .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); }
-        .header { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); padding: 40px 20px; text-align: center; color: #ffffff; }
+        .header { background: #132651; padding: 40px 20px; text-align: center; color: #ffffff; }
         .header h1 { margin: 0; font-size: 28px; font-weight: 700; }
         .header p { margin: 10px 0 0; font-size: 16px; opacity: 0.9; }
         .content { padding: 40px 30px; color: #1f2937; line-height: 1.6; }
@@ -21,7 +21,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>LocalService</h1>
+            <img src="{{ isset($message) ? $message->embed(public_path('brand/logo-correo.png')) : asset('brand/logo-correo.png') }}" alt="LocalService" width="220" style="display:block; margin:0 auto; border:0; height:auto;">
             <p>Resultado de la verificación de tu solicitud</p>
         </div>
         <div class="content">

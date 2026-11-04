@@ -30,6 +30,8 @@ class PerfilProveedor extends Model
         'foto_perfil',
         'nota_rechazo',
         'ciudad',
+        'radio_cobertura_km',
+        'barrios_cobertura',
         'esta_verificado',
     ];
 
@@ -44,6 +46,8 @@ class PerfilProveedor extends Model
             'precio_por_hora' => 'decimal:2',
             'anios_experiencia' => 'integer',
             'total_resenas' => 'integer',
+            'radio_cobertura_km' => 'integer',
+            'barrios_cobertura' => 'array',
         ];
     }
 

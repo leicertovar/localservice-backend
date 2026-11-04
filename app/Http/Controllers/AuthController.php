@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\Support\Carbon;
 use App\Models\Usuario;
@@ -17,6 +18,7 @@ use App\Mail\ProveedorRegistradoMail;
 use App\Mail\ProveedorAprobadoMail;
 use App\Mail\ProveedorRechazadoMail;
 use App\Mail\RestablecerPasswordMail;
+use App\Mail\CodigoRecuperacionMail;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
 
@@ -35,12 +37,18 @@ class AuthController extends Controller
             'email' => 'required|email|unique:usuarios,email',
             'telefono' => 'nullable|string|unique:usuarios,telefono',
             'password' => 'required|string|min:8|confirmed',
-            'rol' => 'nullable|in:cliente,proveedor,admin',
+            // Solo cliente o proveedor: los administradores no se crean desde el registro público
+            'rol' => 'nullable|in:cliente,proveedor',
             // Reglas obligatorias para Proveedor
             'categoria_servicio' => 'required_if:rol,proveedor|string|max:255',
             'doc_cedula'  => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
             'doc_rut'     => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
             'doc_diploma' => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            // Zona de cobertura del proveedor (app móvil; opcional para el registro web)
+            'ciudad' => 'nullable|string|max:255',
+            'radio_cobertura_km' => 'nullable|integer|min:1|max:100',
+            'barrios_cobertura' => 'nullable|array|max:30',
+            'barrios_cobertura.*' => 'string|max:100',
         ]);
 
         // 2. Mapear el rol del formato string recibido al ID numérico relacional
@@ -91,6 +99,9 @@ class AuthController extends Controller
                 'precio_por_hora' => $request->input('precio_por_hora', 0.00),
                 'habilidades' => $request->input('habilidades'),
                 'horario_atencion' => $request->input('horario_atencion'),
+                'ciudad' => $datosValidados['ciudad'] ?? null,
+                'radio_cobertura_km' => $datosValidados['radio_cobertura_km'] ?? null,
+                'barrios_cobertura' => $datosValidados['barrios_cobertura'] ?? null,
                 'doc_cedula'  => $guardarDoc('doc_cedula'),
                 'doc_rut'     => $guardarDoc('doc_rut'),
                 'doc_diploma' => $guardarDoc('doc_diploma'),
@@ -174,11 +185,15 @@ class AuthController extends Controller
             ], 403);
         }
 
-        // 4. Cargar relación de rol para anexar detalles informativos en la respuesta
+        // 4. Si el usuario había desactivado su cuenta, iniciar sesión la reactiva
+        $cuentaReactivada = $this->reactivarSiEstaDesactivada($usuario);
+
+        // 5. Cargar relación de rol para anexar detalles informativos en la respuesta
         $usuario->load('rol');
 
         return response()->json([
             'mensaje' => 'Inicio de sesión exitoso.',
+            'cuenta_reactivada' => $cuentaReactivada,
             'usuario' => [
                 'id' => $usuario->id,
                 'nombre' => $usuario->nombre,
@@ -189,6 +204,95 @@ class AuthController extends Controller
             'token_acceso' => $token,
             'tipo_token' => 'bearer',
         ]);
+    }
+
+    /**
+     * App móvil: inicio de sesión con Google.
+     * Recibe el idToken del plugin nativo, lo valida con Google y devuelve el JWT de LocalService.
+     * Si el correo no tiene cuenta, se crea una de cliente aprobada.
+     */
+    public function iniciarSesionGoogle(Request $request)
+    {
+        $datosValidados = $request->validate([
+            'id_token' => 'required|string',
+        ]);
+
+        $clienteId = config('services.google.client_id');
+        if (!$clienteId) {
+            Log::error('GOOGLE_CLIENT_ID no está configurado en el .env del backend.');
+            return response()->json(['mensaje' => 'El inicio de sesión con Google no está disponible.'], 503);
+        }
+
+        // 1. Validar el token con Google (firma y vigencia); luego audiencia, emisor y correo
+        try {
+            $respuesta = Http::timeout(10)->get('https://oauth2.googleapis.com/tokeninfo', [
+                'id_token' => $datosValidados['id_token'],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('No se pudo contactar a Google para validar el idToken: ' . $e->getMessage());
+            return response()->json(['mensaje' => 'No pudimos contactar a Google. Inténtalo de nuevo.'], 503);
+        }
+
+        $datosGoogle = $respuesta->json();
+        $tokenValido = $respuesta->successful()
+            && ($datosGoogle['aud'] ?? null) === $clienteId
+            && in_array($datosGoogle['iss'] ?? null, ['accounts.google.com', 'https://accounts.google.com'], true)
+            && ($datosGoogle['email_verified'] ?? null) === 'true'
+            && !empty($datosGoogle['email']);
+
+        if (!$tokenValido) {
+            return response()->json(['mensaje' => 'La sesión de Google no es válida. Inténtalo de nuevo.'], 401);
+        }
+
+        // 2. Buscar la cuenta por correo o crear una de cliente
+        $email = strtolower($datosGoogle['email']);
+        $usuario = Usuario::whereRaw('LOWER(email) = ?', [$email])->first();
+        $cuentaNueva = false;
+
+        if (!$usuario) {
+            $usuario = DB::transaction(function () use ($datosGoogle, $email) {
+                $nuevo = Usuario::create([
+                    'nombre' => $datosGoogle['given_name'] ?? ($datosGoogle['name'] ?? 'Usuario'),
+                    'apellido' => $datosGoogle['family_name'] ?? null,
+                    'email' => $email,
+                    // Contraseña aleatoria: podrá definir una propia con "¿Olvidaste tu contraseña?"
+                    'password' => Hash::make(Str::random(40)),
+                    'rol_id' => 1, // Cliente
+                    'esta_aprobado' => true,
+                ]);
+
+                PerfilCliente::create(['usuario_id' => $nuevo->id]);
+
+                return $nuevo;
+            });
+            $cuentaNueva = true;
+        }
+
+        // 3. Mismo control de acceso que el login con contraseña
+        if (!$usuario->esta_aprobado) {
+            return response()->json([
+                'mensaje' => 'Su cuenta aún no ha sido aprobada por el administrador. Por favor, espere la verificación de sus documentos.'
+            ], 403);
+        }
+
+        $cuentaReactivada = $this->reactivarSiEstaDesactivada($usuario);
+        $token = JWTAuth::fromUser($usuario);
+        $usuario->load('rol');
+
+        return response()->json([
+            'mensaje' => $cuentaNueva ? 'Cuenta creada con Google.' : 'Inicio de sesión exitoso.',
+            'cuenta_nueva' => $cuentaNueva,
+            'cuenta_reactivada' => $cuentaReactivada,
+            'usuario' => [
+                'id' => $usuario->id,
+                'nombre' => $usuario->nombre,
+                'email' => $usuario->email,
+                'rol' => $usuario->rol ? $usuario->rol->nombre : null,
+                'esta_aprobado' => $usuario->esta_aprobado,
+            ],
+            'token_acceso' => $token,
+            'tipo_token' => 'bearer',
+        ], $cuentaNueva ? 201 : 200);
     }
 
     /**
@@ -521,6 +625,124 @@ class AuthController extends Controller
         ]);
     }
 
+    /** Minutos de validez del código de recuperación (app móvil). */
+    private const MINUTOS_VALIDEZ_CODIGO = 15;
+
+    /** Intentos fallidos permitidos antes de invalidar el código. */
+    private const MAX_INTENTOS_CODIGO = 5;
+
+    /**
+     * App móvil: envía un código de 6 dígitos al correo para recuperar la contraseña.
+     * Responde lo mismo exista o no la cuenta, para no revelar qué correos están registrados.
+     */
+    public function solicitarCodigoRecuperacion(Request $request)
+    {
+        $datosValidados = $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $email = $datosValidados['email'];
+        $respuesta = [
+            'mensaje' => 'Si el correo está registrado, te enviamos un código de verificación.',
+            'minutos_validez' => self::MINUTOS_VALIDEZ_CODIGO,
+        ];
+
+        $usuario = Usuario::where('email', $email)->first();
+        if (!$usuario) {
+            return response()->json($respuesta);
+        }
+
+        // 1. Generar el código y guardarlo cifrado (reemplaza cualquier código anterior)
+        $codigo = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        DB::table('codigos_recuperacion')->updateOrInsert(
+            ['email' => $email],
+            [
+                'codigo' => Hash::make($codigo),
+                'intentos' => 0,
+                'created_at' => Carbon::now(),
+            ]
+        );
+
+        // 2. Enviar el correo con el código
+        try {
+            Mail::to($email)->send(new CodigoRecuperacionMail($usuario, $codigo, self::MINUTOS_VALIDEZ_CODIGO));
+        } catch (\Exception $e) {
+            Log::error('Fallo al enviar el código de recuperación SMTP: ' . $e->getMessage());
+            DB::table('codigos_recuperacion')->where('email', $email)->delete();
+
+            return response()->json([
+                'mensaje' => 'No pudimos enviar el correo en este momento. Inténtalo de nuevo más tarde.',
+            ], 503);
+        }
+
+        return response()->json($respuesta);
+    }
+
+    /**
+     * App móvil: valida el código de recuperación.
+     * Si es correcto, devuelve un token de un solo uso para /auth/restablecer-password.
+     */
+    public function verificarCodigoRecuperacion(Request $request)
+    {
+        $datosValidados = $request->validate([
+            'email' => 'required|email',
+            'codigo' => 'required|digits:6',
+        ]);
+
+        $email = $datosValidados['email'];
+        $registro = DB::table('codigos_recuperacion')->where('email', $email)->first();
+
+        // 1. Debe existir un código vigente
+        $expirado = $registro
+            && Carbon::parse($registro->created_at)->addMinutes(self::MINUTOS_VALIDEZ_CODIGO)->isPast();
+
+        if (!$registro || $expirado) {
+            DB::table('codigos_recuperacion')->where('email', $email)->delete();
+            return response()->json([
+                'mensaje' => 'El código expiró o no es válido. Solicita uno nuevo.',
+                'codigo_expirado' => true,
+            ], 400);
+        }
+
+        // 2. Comparar el código; cada fallo consume un intento
+        if (!Hash::check($datosValidados['codigo'], $registro->codigo)) {
+            $intentos = $registro->intentos + 1;
+            $restantes = self::MAX_INTENTOS_CODIGO - $intentos;
+
+            if ($restantes <= 0) {
+                DB::table('codigos_recuperacion')->where('email', $email)->delete();
+                return response()->json([
+                    'mensaje' => 'Superaste el número de intentos. Solicita un código nuevo.',
+                    'codigo_expirado' => true,
+                ], 400);
+            }
+
+            DB::table('codigos_recuperacion')->where('email', $email)->update(['intentos' => $intentos]);
+            return response()->json([
+                'mensaje' => 'El código es incorrecto.',
+                'intentos_restantes' => $restantes,
+            ], 400);
+        }
+
+        // 3. Código correcto: se consume y se emite el token que usa restablecerPassword()
+        DB::table('codigos_recuperacion')->where('email', $email)->delete();
+
+        $token = Str::random(60);
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $email],
+            [
+                'token' => Hash::make($token),
+                'created_at' => Carbon::now(),
+            ]
+        );
+
+        return response()->json([
+            'mensaje' => 'Código verificado. Ya puedes crear tu nueva contraseña.',
+            'token' => $token,
+        ]);
+    }
+
     /**
      * Restablece la contraseña del usuario tras validar el token enviado.
      */
@@ -568,5 +790,18 @@ class AuthController extends Controller
         return response()->json([
             'mensaje' => 'Su contraseña ha sido restablecida con éxito. Ya puede iniciar sesión.'
         ]);
+    }
+
+    /**
+     * Reactiva una cuenta que su dueño había desactivado (ver CuentaController).
+     */
+    private function reactivarSiEstaDesactivada(Usuario $usuario): bool
+    {
+        if (!$usuario->desactivado_en) {
+            return false;
+        }
+        $usuario->desactivado_en = null;
+        $usuario->save();
+        return true;
     }
 }

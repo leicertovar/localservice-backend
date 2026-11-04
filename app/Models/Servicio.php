@@ -18,6 +18,8 @@ class Servicio extends Model
         'precio',
         'descripcion',
         'esta_activo',
+        'zona',
+        'tipo_cobro',
     ];
 
     // Casts de atributos para formatear tipos de datos

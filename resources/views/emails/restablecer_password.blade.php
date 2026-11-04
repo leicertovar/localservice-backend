@@ -21,7 +21,7 @@
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
         }
         .header {
-            background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
+            background: #132651;
             padding: 40px 20px;
             text-align: center;
             color: #ffffff;
@@ -54,7 +54,7 @@
         }
         .btn-primary {
             display: inline-block;
-            background-color: #4f46e5;
+            background-color: #1a75ee;
             color: #ffffff !important;
             text-decoration: none;
             padding: 14px 30px;
@@ -65,7 +65,7 @@
             transition: background-color 0.2s;
         }
         .btn-primary:hover {
-            background-color: #4338ca;
+            background-color: #1565d8;
         }
         .card {
             background-color: #f9fafb;
@@ -87,7 +87,7 @@
         .badge {
             display: inline-block;
             background-color: rgba(79, 70, 229, 0.1);
-            color: #4f46e5;
+            color: #1a75ee;
             padding: 6px 12px;
             border-radius: 9999px;
             font-size: 13px;
@@ -99,7 +99,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>LocalService</h1>
+            <img src="{{ isset($message) ? $message->embed(public_path('brand/logo-correo.png')) : asset('brand/logo-correo.png') }}" alt="LocalService" width="220" style="display:block; margin:0 auto; border:0; height:auto;">
             <p>Recuperación de Acceso de Cuenta</p>
         </div>
         <div class="content">
@@ -115,7 +115,7 @@
             </div>
 
             <p>Si el botón de arriba no funciona, puedes copiar y pegar el siguiente enlace en tu navegador web:</p>
-            <p style="word-break: break-all; font-size: 13px; color: #4f46e5;">
+            <p style="word-break: break-all; font-size: 13px; color: #1a75ee;">
                 http://localhost:8080/recuperar-contrasena?token={{ $token }}&email={{ urlencode($email) }}
             </p>
 

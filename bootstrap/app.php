@@ -12,7 +12,8 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        
+        // Rechaza tokens de cuentas desactivadas o eliminadas por su dueño
+        $middleware->appendToGroup('api', \App\Http\Middleware\CuentaActiva::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

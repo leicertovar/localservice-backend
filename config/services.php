@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    // Inicio de sesión con Google (app móvil). Es el "Web client ID" de Google Cloud:
+    // el mismo valor que VITE_GOOGLE_CLIENT_ID en localservice-movil.
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+    ],
+
 ];
