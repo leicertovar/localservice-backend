@@ -4,7 +4,7 @@ return [
     'paths'             => ['api/*'],
     'allowed_methods'   => ['*'],
     'allowed_origins'   => [
-        'http://localhost:8080',  // Frontend web
+        rtrim(env('FRONTEND_URL', 'http://localhost:8080'), '/'),  // Frontend web
         'http://localhost:5173',  // App móvil: npm run dev (Vite)
         'http://localhost:8100',  // App móvil: ionic serve
         'https://localhost',      // App móvil: Capacitor Android
