@@ -109,14 +109,14 @@
             <p>Para establecer una nueva contraseña, haz clic en el siguiente botón de restablecimiento de seguridad:</p>
             
             <div class="button-container">
-                <a href="http://localhost:8080/recuperar-contrasena?token={{ $token }}&email={{ urlencode($email) }}" class="btn-primary" target="_blank">
+                <a href="{{ config('app.frontend_url') }}/recuperar-contrasena?token={{ $token }}&email={{ urlencode($email) }}" class="btn-primary" target="_blank">
                     Restablecer Contraseña
                 </a>
             </div>
 
             <p>Si el botón de arriba no funciona, puedes copiar y pegar el siguiente enlace en tu navegador web:</p>
             <p style="word-break: break-all; font-size: 13px; color: #1a75ee;">
-                http://localhost:8080/recuperar-contrasena?token={{ $token }}&email={{ urlencode($email) }}
+                {{ config('app.frontend_url') }}/recuperar-contrasena?token={{ $token }}&email={{ urlencode($email) }}
             </p>
 
             <div class="card">
