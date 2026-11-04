@@ -123,7 +123,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <img src="{{ isset($message) ? $message->embed(public_path('brand/logo-correo.png')) : asset('brand/logo-correo.png') }}" alt="LocalService" width="220" style="display:block; margin:0 auto; border:0; height:auto;">
+            @include('emails.partials.logo')
             <p>Tu plataforma de servicios locales de confianza</p>
         </div>
         <div class="content">

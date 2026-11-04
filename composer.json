@@ -12,6 +12,8 @@
         "php": "^8.2",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
+        "symfony/brevo-mailer": "^7.4",
+        "symfony/http-client": "^7.4",
         "tymon/jwt-auth": "*"
     },
     "require-dev": {

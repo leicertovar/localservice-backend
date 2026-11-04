@@ -4,12 +4,15 @@ namespace App\Mail;
 
 use App\Models\Usuario;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class CodigoRecuperacionMail extends Mailable
+// Cifrado: el código o enlace no debe quedar legible en la tabla jobs
+class CodigoRecuperacionMail extends Mailable implements ShouldQueue, ShouldBeEncrypted
 {
     use Queueable, SerializesModels;
 

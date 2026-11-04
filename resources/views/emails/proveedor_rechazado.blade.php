@@ -21,11 +21,11 @@
 <body>
     <div class="container">
         <div class="header">
-            <img src="{{ isset($message) ? $message->embed(public_path('brand/logo-correo.png')) : asset('brand/logo-correo.png') }}" alt="LocalService" width="220" style="display:block; margin:0 auto; border:0; height:auto;">
+            @include('emails.partials.logo')
             <p>Resultado de la verificación de tu solicitud</p>
         </div>
         <div class="content">
-            <div class="greeting">Hola, {{ $usuario->nombre }}.</div>
+            <div class="greeting">Hola, {{ $nombre }}.</div>
             <p>Lamentamos informarte que luego de revisar tu documentación, no ha sido posible aprobar tu cuenta de proveedor en <strong>LocalService</strong> en este momento.</p>
 
             <div class="alert-box">
