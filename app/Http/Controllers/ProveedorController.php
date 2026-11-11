@@ -39,6 +39,9 @@ class ProveedorController extends Controller
                 'precio_por_hora' => (float)($perfil?->precio_por_hora ?? 0),
                 'anios_experiencia' => (int)($perfil?->anios_experiencia ?? 0),
                 'esta_verificado' => (bool)($perfil?->esta_verificado ?? false),
+                // Zona de trabajo declarada por el proveedor
+                'radio_cobertura_km' => $perfil?->radio_cobertura_km,
+                'barrios_cobertura' => $perfil?->barrios_cobertura ?? [],
             ];
         });
 
@@ -133,9 +136,13 @@ class ProveedorController extends Controller
             'habilidades' => $datosValidados['habilidades'] ?? null,
             'enlaces_portafolio' => $datosValidados['enlaces_portafolio'] ?? null,
             'horario_atencion' => $datosValidados['horario_atencion'] ?? null,
-            'ciudad' => $datosValidados['ciudad'] ?? null,
             'categoria_servicio' => $datosValidados['categoria_servicio'] ?? $usuario->perfilProveedor?->categoria_servicio,
         ];
+
+        // La ciudad solo cambia si se envía (la zona de trabajo se edita en PUT /proveedor/zona)
+        if ($request->has('ciudad')) {
+            $datosPerfil['ciudad'] = $datosValidados['ciudad'] ?? null;
+        }
 
         if ($request->hasFile('foto_perfil')) {
             $archivo = $request->file('foto_perfil');
@@ -156,6 +163,55 @@ class ProveedorController extends Controller
         return response()->json([
             'mensaje' => 'Perfil de proveedor actualizado correctamente.',
             'usuario' => $usuario
+        ]);
+    }
+
+    /**
+     * El proveedor actualiza su zona de trabajo: municipio, radio de desplazamiento y barrios.
+     * Es información para los clientes (se muestra en su perfil); no filtra solicitudes.
+     */
+    public function actualizarZona(Request $request)
+    {
+        $usuario = JWTAuth::user();
+        if (!$usuario || $usuario->rol_id !== 2) {
+            return response()->json(['mensaje' => 'Solo los proveedores tienen zona de trabajo.'], 403);
+        }
+
+        $datos = $request->validate([
+            'ciudad' => 'required|string|max:255',
+            'radio_cobertura_km' => 'required|integer|min:1|max:100',
+            'barrios_cobertura' => 'required|array|min:1|max:30',
+            'barrios_cobertura.*' => 'required|string|min:2|max:100',
+        ], [
+            'ciudad.required' => 'Elige el municipio donde trabajas.',
+            'radio_cobertura_km.required' => 'Indica hasta cuántos kilómetros te desplazas.',
+            'radio_cobertura_km.min' => 'El radio debe ser de al menos 1 km.',
+            'radio_cobertura_km.max' => 'El radio puede ser de máximo 100 km.',
+            'barrios_cobertura.required' => 'Elige al menos un barrio donde atiendes.',
+            'barrios_cobertura.min' => 'Elige al menos un barrio donde atiendes.',
+            'barrios_cobertura.max' => 'Puedes elegir máximo 30 barrios.',
+            'barrios_cobertura.*.min' => 'Escribe el nombre completo del barrio.',
+            'barrios_cobertura.*.max' => 'El nombre del barrio es muy largo.',
+        ]);
+
+        // Sin espacios sobrantes ni barrios repetidos (sin importar mayúsculas)
+        $barrios = [];
+        foreach ($datos['barrios_cobertura'] as $barrio) {
+            $limpio = trim(preg_replace('/\s+/', ' ', $barrio));
+            $barrios[mb_strtolower($limpio)] = $limpio;
+        }
+
+        PerfilProveedor::updateOrCreate(['usuario_id' => $usuario->id], [
+            'ciudad' => trim($datos['ciudad']),
+            'radio_cobertura_km' => $datos['radio_cobertura_km'],
+            'barrios_cobertura' => array_values($barrios),
+        ]);
+
+        $usuario->load(['rol', 'perfilProveedor']);
+
+        return response()->json([
+            'mensaje' => 'Zona de trabajo actualizada.',
+            'usuario' => $usuario,
         ]);
     }
 }

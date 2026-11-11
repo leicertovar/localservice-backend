@@ -9,6 +9,7 @@ use App\Models\Servicio;
 use App\Models\Usuario;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
 
 class SolicitudServicioController extends Controller
 {
@@ -92,6 +93,8 @@ class SolicitudServicioController extends Controller
             'estado' => 'pendiente'
         ]);
 
+        $solicitud->eventos()->create(['estado' => 'pendiente', 'actor_id' => $cliente->id]);
+
         // Avisar al proveedor de la nueva solicitud
         Notificacion::crear(
             $proveedor->id,
@@ -124,7 +127,7 @@ class SolicitudServicioController extends Controller
 
         // Obtener solicitudes
         $solicitudes = SolicitudServicio::where('proveedor_id', $proveedor->id)
-            ->with(['cliente', 'servicio'])
+            ->with(['cliente:id,nombre,apellido,telefono', 'servicio', 'eventos'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -150,7 +153,7 @@ class SolicitudServicioController extends Controller
         // Obtener solicitudes
         // "resena" indica si el cliente ya calificó el servicio (una calificación por servicio)
         $solicitudes = SolicitudServicio::where('cliente_id', $cliente->id)
-            ->with(['proveedor', 'servicio', 'resena:id,solicitud_id,calificacion'])
+            ->with(['proveedor:id,nombre,apellido,telefono', 'proveedor.perfilProveedor:id,usuario_id,categoria_servicio,foto_perfil', 'servicio', 'resena:id,solicitud_id,calificacion', 'eventos'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -158,154 +161,216 @@ class SolicitudServicioController extends Controller
     }
 
     /**
-     * El proveedor cotiza una solicitud de servicio pendiente.
-     * 
-     * @param \Illuminate\Http\Request $request
-     * @param int $id Identificador de la solicitud.
-     * @return \Illuminate\Http\JsonResponse
+     * Detalle de una solicitud para el cliente o el proveedor (incluye la línea de tiempo).
+     */
+    public function obtenerSolicitud($id)
+    {
+        $usuario = JWTAuth::user();
+        if (!$usuario) {
+            return response()->json(['mensaje' => 'No autorizado.'], 401);
+        }
+
+        $solicitud = $this->buscarDeUsuario($id, $usuario);
+        if (!$solicitud) {
+            return response()->json(['mensaje' => 'Solicitud no encontrada.'], 404);
+        }
+
+        $solicitud->load([
+            'cliente:id,nombre,apellido',
+            'proveedor:id,nombre,apellido',
+            'proveedor.perfilProveedor:id,usuario_id,categoria_servicio,foto_perfil,calificacion,total_resenas',
+            'servicio',
+            'resena:id,solicitud_id,calificacion',
+            'eventos',
+        ]);
+
+        return response()->json($solicitud);
+    }
+
+    /**
+     * El proveedor cotiza una solicitud pendiente (o actualiza una cotización que el cliente aún no responde).
      */
     public function cotizarSolicitud(Request $request, $id)
     {
-        // Obtener proveedor autenticado
         $proveedor = JWTAuth::user();
-
-        if (!$proveedor) {
-            return response()->json([
-                'mensaje' => 'No autorizado.'
-            ], 401);
+        if (!$proveedor || $proveedor->rol_id !== 2) {
+            return response()->json(['mensaje' => 'Solo los proveedores pueden cotizar.'], 403);
         }
 
-        // Buscar la solicitud recibida
-        $solicitud = SolicitudServicio::where('id', $id)
-            ->where('proveedor_id', $proveedor->id)
-            ->first();
-
+        $solicitud = SolicitudServicio::where('id', $id)->where('proveedor_id', $proveedor->id)->first();
         if (!$solicitud) {
-            return response()->json([
-                'mensaje' => 'Solicitud no encontrada.'
-            ], 404);
+            return response()->json(['mensaje' => 'Solicitud no encontrada.'], 404);
+        }
+        if (!in_array($solicitud->estado, ['pendiente', 'cotizado'], true)) {
+            return $this->conflicto($solicitud, 'cotizar');
         }
 
-        // Validar datos de la cotización
-        $datosValidados = $request->validate([
-            'monto_cotizado' => 'required|string|max:255',
-            'tiempo_estimado' => 'required|string|max:255',
-            'garantia' => 'nullable|string|max:255',
-            'detalles_cotizacion' => 'nullable|string',
-        ]);
+        $datos = $this->datosCotizacion($request, true);
+        $actualizada = $solicitud->estado === 'cotizado';
 
-        // Actualizar datos y cambiar estado a 'cotizado'
-        $solicitud->update([
-            'monto_cotizado' => $datosValidados['monto_cotizado'],
-            'tiempo_estimado' => $datosValidados['tiempo_estimado'],
-            'garantia' => $datosValidados['garantia'] ?? null,
-            'detalles_cotizacion' => $datosValidados['detalles_cotizacion'] ?? null,
-            'estado' => 'cotizado'
-        ]);
+        $solicitud->cambiarEstado('cotizado', $proveedor->id, [
+            'monto_cotizado' => $datos['monto_cotizado'],
+            'tiempo_estimado' => $datos['tiempo_estimado'],
+            'garantia' => $datos['garantia'] ?? null,
+            'detalles_cotizacion' => $datos['detalles_cotizacion'] ?? null,
+        ], $actualizada ? 'Cotización actualizada' : null);
 
-        // Notificar al cliente
-        Notificacion::crear(
-            $solicitud->cliente_id,
-            'solicitud',
-            'Cotización recibida',
-            "Tu proveedor envió una cotización de {$solicitud->monto_cotizado}. ¡Revísala!"
-        );
+        $this->notificarCotizacion($solicitud);
 
         return response()->json([
-            'mensaje' => 'Cotización enviada con éxito.',
-            'solicitud' => $solicitud
+            'mensaje' => $actualizada ? 'Cotización actualizada.' : 'Cotización enviada con éxito.',
+            'solicitud' => $solicitud->fresh(),
         ]);
     }
 
     /**
-     * El cliente acepta la cotización propuesta por el proveedor.
-     * 
-     * @param int $id Identificador de la solicitud.
-     * @return \Illuminate\Http\JsonResponse
+     * Aceptar una solicitud:
+     * - el cliente acepta la cotización recibida (cotizado → aceptada);
+     * - el proveedor acepta directamente una solicitud nueva (pendiente → aceptada), con precio opcional.
      */
-    public function aceptarCotizacion($id)
+    public function aceptarCotizacion(Request $request, $id)
     {
-        // Obtener cliente autenticado
-        $cliente = JWTAuth::user();
-
-        if (!$cliente) {
-            return response()->json([
-                'mensaje' => 'No autorizado.'
-            ], 401);
+        $usuario = JWTAuth::user();
+        if (!$usuario) {
+            return response()->json(['mensaje' => 'No autorizado.'], 401);
         }
 
-        // Buscar la solicitud realizada
-        $solicitud = SolicitudServicio::where('id', $id)
-            ->where('cliente_id', $cliente->id)
-            ->first();
-
+        $solicitud = $this->buscarDeUsuario($id, $usuario);
         if (!$solicitud) {
-            return response()->json([
-                'mensaje' => 'Solicitud no encontrada.'
-            ], 404);
+            return response()->json(['mensaje' => 'Solicitud no encontrada.'], 404);
         }
 
-        // Actualizar estado a 'aceptada' (confirmado en agenda)
-        $solicitud->update(['estado' => 'aceptada']);
+        if ($solicitud->proveedor_id === $usuario->id) {
+            if ($solicitud->estado !== 'pendiente') {
+                return $this->conflicto($solicitud, 'aceptar');
+            }
+            $datos = $this->datosCotizacion($request, false);
+            $cambios = array_filter([
+                'monto_cotizado' => $datos['monto_cotizado'] ?? null,
+                'tiempo_estimado' => $datos['tiempo_estimado'] ?? null,
+                'detalles_cotizacion' => $datos['detalles_cotizacion'] ?? null,
+            ], fn ($v) => $v !== null && $v !== '');
+            $solicitud->cambiarEstado('aceptada', $usuario->id, $cambios);
 
-        // Notificar al proveedor
+            Notificacion::crear(
+                $solicitud->cliente_id,
+                'solicitud',
+                'Solicitud aceptada',
+                "{$usuario->nombre} aceptó tu solicitud para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.'
+            );
+
+            return response()->json(['mensaje' => 'Aceptaste el trabajo.', 'solicitud' => $solicitud->fresh()]);
+        }
+
+        if ($solicitud->estado !== 'cotizado') {
+            return $this->conflicto($solicitud, 'aceptar la cotización');
+        }
+        $solicitud->cambiarEstado('aceptada', $usuario->id);
+
         Notificacion::crear(
             $solicitud->proveedor_id,
             'solicitud',
             'Cotización aceptada',
-            "{$cliente->nombre} aceptó tu cotización para el {$solicitud->fecha}."
+            "{$usuario->nombre} aceptó tu cotización para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.'
         );
 
         return response()->json([
             'mensaje' => 'Cotización aceptada con éxito. El servicio ha sido programado.',
-            'solicitud' => $solicitud
+            'solicitud' => $solicitud->fresh(),
         ]);
     }
 
     /**
-     * Rechaza la solicitud (tanto por el cliente como por el proveedor).
-     * 
-     * @param int $id Identificador de la solicitud.
-     * @return \Illuminate\Http\JsonResponse
+     * Rechazar: el proveedor rechaza una solicitud (→ rechazada). Si lo hace el cliente
+     * (p. ej. rechaza la cotización desde la web), equivale a cancelarla (→ cancelada).
      */
-    public function rechazarSolicitud($id)
+    public function rechazarSolicitud(Request $request, $id)
     {
-        // Obtener usuario autenticado
         $usuario = JWTAuth::user();
-
         if (!$usuario) {
-            return response()->json([
-                'mensaje' => 'No autorizado.'
-            ], 401);
+            return response()->json(['mensaje' => 'No autorizado.'], 401);
         }
 
-        // Buscar la solicitud (debe pertenecer al cliente o al proveedor)
-        $solicitud = SolicitudServicio::where('id', $id)
-            ->where(function($query) use ($usuario) {
-                $query->where('cliente_id', $usuario->id)
-                      ->orWhere('proveedor_id', $usuario->id);
-            })
-            ->first();
-
+        $solicitud = $this->buscarDeUsuario($id, $usuario);
         if (!$solicitud) {
-            return response()->json([
-                'mensaje' => 'Solicitud no encontrada.'
-            ], 404);
+            return response()->json(['mensaje' => 'Solicitud no encontrada.'], 404);
         }
 
-        // Actualizar estado a 'rechazada'
-        $solicitud->update([
-            'estado' => 'rechazada'
-        ]);
+        if ($solicitud->cliente_id === $usuario->id) {
+            return $this->cancelar($request, $solicitud, $usuario);
+        }
 
-        return response()->json([
-            'mensaje' => 'Solicitud o cotización rechazada.',
-            'solicitud' => $solicitud
-        ]);
+        if (!in_array($solicitud->estado, ['pendiente', 'cotizado'], true)) {
+            return $this->conflicto($solicitud, 'rechazar');
+        }
+        $motivo = $request->validate(['motivo' => 'nullable|string|max:300'])['motivo'] ?? null;
+        $solicitud->cambiarEstado('rechazada', $usuario->id, [], $motivo);
+
+        Notificacion::crear(
+            $solicitud->cliente_id,
+            'solicitud',
+            'Solicitud rechazada',
+            "{$usuario->nombre} no puede atender tu solicitud. Busca otro proveedor disponible."
+        );
+
+        return response()->json(['mensaje' => 'Solicitud rechazada.', 'solicitud' => $solicitud->fresh()]);
     }
 
     /**
-     * El proveedor marca un servicio como completado y pagado.
+     * El cliente cancela su solicitud mientras el servicio no haya empezado.
+     */
+    public function cancelarSolicitud(Request $request, $id)
+    {
+        $cliente = JWTAuth::user();
+        if (!$cliente) {
+            return response()->json(['mensaje' => 'No autorizado.'], 401);
+        }
+
+        $solicitud = SolicitudServicio::where('id', $id)->where('cliente_id', $cliente->id)->first();
+        if (!$solicitud) {
+            return response()->json(['mensaje' => 'Solicitud no encontrada.'], 404);
+        }
+
+        return $this->cancelar($request, $solicitud, $cliente);
+    }
+
+    /**
+     * El proveedor indica que empezó el trabajo (aceptada → en_curso).
+     */
+    public function iniciarServicio($id)
+    {
+        $proveedor = JWTAuth::user();
+        if (!$proveedor || $proveedor->rol_id !== 2) {
+            return response()->json(['mensaje' => 'No autorizado.'], 403);
+        }
+
+        $solicitud = SolicitudServicio::where('id', $id)->where('proveedor_id', $proveedor->id)->first();
+        if (!$solicitud) {
+            return response()->json(['mensaje' => 'Solicitud no encontrada.'], 404);
+        }
+        if ($solicitud->estado !== 'aceptada') {
+            return $this->conflicto($solicitud, 'iniciar el servicio');
+        }
+        if ($solicitud->fecha && Carbon::now()->toDateString() < Carbon::parse($solicitud->fecha)->toDateString()) {
+            return response()->json([
+                'mensaje' => 'Podrás iniciar el servicio a partir del ' . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.',
+            ], 422);
+        }
+
+        $solicitud->cambiarEstado('en_curso', $proveedor->id);
+
+        Notificacion::crear(
+            $solicitud->cliente_id,
+            'solicitud',
+            'Servicio en curso',
+            "{$proveedor->nombre} empezó a trabajar en tu servicio."
+        );
+
+        return response()->json(['mensaje' => 'Servicio iniciado.', 'solicitud' => $solicitud->fresh()]);
+    }
+
+    /**
+     * El proveedor marca un servicio como completado y pagado (desde aceptada o en curso).
      */
     public function marcarCompletado(Request $request, $id)
     {
@@ -317,7 +382,7 @@ class SolicitudServicioController extends Controller
 
         $solicitud = SolicitudServicio::where('id', $id)
             ->where('proveedor_id', $proveedor->id)
-            ->where('estado', 'aceptada')
+            ->whereIn('estado', ['aceptada', 'en_curso'])
             ->first();
 
         if (!$solicitud) {
@@ -335,8 +400,7 @@ class SolicitudServicioController extends Controller
             }
         }
 
-        $solicitud->update([
-            'estado' => 'completada',
+        $solicitud->cambiarEstado('completada', $proveedor->id, [
             'fecha_completado' => Carbon::now(),
             'marcado_pagado' => true,
         ]);
@@ -349,7 +413,7 @@ class SolicitudServicioController extends Controller
             "El proveedor marcó el servicio como completado. Por favor confirma si está de acuerdo."
         );
 
-        return response()->json(['mensaje' => 'Servicio marcado como completado.', 'solicitud' => $solicitud]);
+        return response()->json(['mensaje' => 'Servicio marcado como completado.', 'solicitud' => $solicitud->fresh()]);
     }
 
     /**
@@ -551,6 +615,95 @@ class SolicitudServicioController extends Controller
         return response()->json($disputas);
     }
 
+    /** Cómo se nombra cada estado en los mensajes al usuario. */
+    private const ETIQUETAS_ESTADO = [
+        'pendiente' => 'pendiente',
+        'cotizado' => 'cotizada',
+        'aceptada' => 'aceptada',
+        'en_curso' => 'en curso',
+        'completada' => 'completada',
+        'rechazada' => 'rechazada',
+        'cancelada' => 'cancelada',
+    ];
+
+    /** Solicitud en la que el usuario participa como cliente o como proveedor. */
+    private function buscarDeUsuario($id, $usuario): ?SolicitudServicio
+    {
+        return SolicitudServicio::where('id', $id)
+            ->where(function ($query) use ($usuario) {
+                $query->where('cliente_id', $usuario->id)->orWhere('proveedor_id', $usuario->id);
+            })
+            ->first();
+    }
+
+    /** La acción no aplica al estado actual (p. ej. otra persona ya la cambió). */
+    private function conflicto(SolicitudServicio $solicitud, string $accion)
+    {
+        $estado = self::ETIQUETAS_ESTADO[$solicitud->estado] ?? $solicitud->estado;
+        return response()->json([
+            'mensaje' => "No puedes {$accion}: la solicitud está {$estado}.",
+            'estado' => $solicitud->estado,
+        ], 409);
+    }
+
+    /**
+     * Valida los datos de una cotización. El monto se guarda solo con dígitos (pesos):
+     * acepta "85000", "85.000" o "$85.000".
+     */
+    private function datosCotizacion(Request $request, bool $obligatoria): array
+    {
+        $requerido = $obligatoria ? 'required' : 'nullable';
+        $datos = $request->validate([
+            'monto_cotizado' => "{$requerido}|max:30",
+            'tiempo_estimado' => "{$requerido}|string|max:100",
+            'garantia' => 'nullable|string|max:100',
+            'detalles_cotizacion' => 'nullable|string|max:1000',
+        ], [
+            'monto_cotizado.required' => 'Escribe el valor de la cotización.',
+            'monto_cotizado.max' => 'Escribe un valor válido.',
+            'tiempo_estimado.required' => 'Indica cuánto tardarás aproximadamente.',
+            'tiempo_estimado.max' => 'El tiempo estimado puede tener máximo 100 caracteres.',
+            'garantia.max' => 'La garantía puede tener máximo 100 caracteres.',
+            'detalles_cotizacion.max' => 'Los detalles pueden tener máximo 1000 caracteres.',
+        ]);
+
+        if (isset($datos['monto_cotizado']) && $datos['monto_cotizado'] !== '') {
+            $monto = (int) preg_replace('/\D/', '', (string) $datos['monto_cotizado']);
+            if ($monto < 1000 || $monto > 100000000) {
+                throw ValidationException::withMessages([
+                    'monto_cotizado' => 'Escribe un valor entre $1.000 y $100.000.000.',
+                ]);
+            }
+            $datos['monto_cotizado'] = (string) $monto;
+        }
+
+        return $datos;
+    }
+
+    /** El cliente cancela (también cuando rechaza la cotización). */
+    private function cancelar(Request $request, SolicitudServicio $solicitud, $cliente)
+    {
+        if (!in_array($solicitud->estado, ['pendiente', 'cotizado', 'aceptada'], true)) {
+            return $this->conflicto($solicitud, 'cancelar');
+        }
+
+        $motivo = $request->validate(['motivo' => 'nullable|string|max:300'])['motivo'] ?? null;
+        if (!$motivo && $solicitud->estado === 'cotizado') {
+            $motivo = 'Rechazó la cotización';
+        }
+        $solicitud->cambiarEstado('cancelada', $cliente->id, [], $motivo);
+
+        Notificacion::crear(
+            $solicitud->proveedor_id,
+            'solicitud',
+            'Solicitud cancelada',
+            "{$cliente->nombre} canceló la solicitud del " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.'
+                . ($motivo ? " Motivo: {$motivo}." : '')
+        );
+
+        return response()->json(['mensaje' => 'Solicitud cancelada.', 'solicitud' => $solicitud->fresh()]);
+    }
+
     /**
      * El proveedor cotiza una solicitud y genera notificación al cliente.
      */
@@ -560,7 +713,7 @@ class SolicitudServicioController extends Controller
             $solicitud->cliente_id,
             'solicitud',
             'Cotización recibida',
-            "Tu proveedor envió una cotización de {$solicitud->monto_cotizado}. ¡Revísala!"
+            "Tu proveedor envió una cotización de $" . number_format((int) $solicitud->monto_cotizado, 0, ',', '.') . ". ¡Revísala!"
         );
     }
 }

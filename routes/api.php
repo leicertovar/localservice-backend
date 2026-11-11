@@ -78,6 +78,7 @@ Route::middleware('auth:api')->group(function () {
     // Actualizar perfil (PUT para JSON, POST para form-data con foto)
     Route::put('/proveedor/perfil', [\App\Http\Controllers\ProveedorController::class, 'actualizarPerfilProveedor']);
     Route::post('/proveedor/perfil', [\App\Http\Controllers\ProveedorController::class, 'actualizarPerfilProveedor']);
+    Route::put('/proveedor/zona', [\App\Http\Controllers\ProveedorController::class, 'actualizarZona']);
 
     // CRUD de servicios
     Route::get('/servicios', [\App\Http\Controllers\ServicioController::class, 'listarServicios']);
@@ -93,6 +94,9 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/solicitudes/{id}/cotizar', [\App\Http\Controllers\SolicitudServicioController::class, 'cotizarSolicitud']);
     Route::post('/solicitudes/{id}/aceptar', [\App\Http\Controllers\SolicitudServicioController::class, 'aceptarCotizacion']);
     Route::post('/solicitudes/{id}/rechazar', [\App\Http\Controllers\SolicitudServicioController::class, 'rechazarSolicitud']);
+    Route::get('/solicitudes/{id}', [\App\Http\Controllers\SolicitudServicioController::class, 'obtenerSolicitud'])->whereNumber('id');
+    Route::post('/solicitudes/{id}/cancelar', [\App\Http\Controllers\SolicitudServicioController::class, 'cancelarSolicitud']);
+    Route::post('/solicitudes/{id}/iniciar', [\App\Http\Controllers\SolicitudServicioController::class, 'iniciarServicio']);
     Route::post('/solicitudes/{id}/completar', [\App\Http\Controllers\SolicitudServicioController::class, 'marcarCompletado']);
     Route::post('/solicitudes/{id}/confirmar', [\App\Http\Controllers\SolicitudServicioController::class, 'confirmarCompletado']);
     Route::post('/solicitudes/{id}/evidencia-proveedor', [\App\Http\Controllers\SolicitudServicioController::class, 'aportarEvidenciaProveedor']);
