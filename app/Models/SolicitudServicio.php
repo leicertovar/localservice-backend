@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class SolicitudServicio extends Model
@@ -73,5 +74,22 @@ class SolicitudServicio extends Model
     public function resena(): HasOne
     {
         return $this->hasOne(Resena::class, 'solicitud_id', 'id');
+    }
+
+    /**
+     * Historial de estados, del más antiguo al más reciente (línea de tiempo).
+     */
+    public function eventos(): HasMany
+    {
+        return $this->hasMany(SolicitudEvento::class, 'solicitud_id', 'id')->orderBy('created_at')->orderBy('id');
+    }
+
+    /**
+     * Cambia el estado y lo deja registrado en la línea de tiempo.
+     */
+    public function cambiarEstado(string $estado, ?string $actorId, array $cambios = [], ?string $nota = null): void
+    {
+        $this->update(array_merge($cambios, ['estado' => $estado]));
+        $this->eventos()->create(['estado' => $estado, 'actor_id' => $actorId, 'nota' => $nota]);
     }
 }
