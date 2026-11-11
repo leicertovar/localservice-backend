@@ -4,7 +4,10 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Resena;
-use App\Models\PerfilProveedor;
+use App\Models\SolicitudServicio;
+use App\Services\CalificacionProveedor;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Carbon;
 use App\Models\Notificacion;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
@@ -37,31 +40,52 @@ class ResenaController extends Controller
 
         $datos = $request->validate([
             'proveedor_id' => 'required|exists:usuarios,id',
-            'solicitud_id' => 'nullable|exists:solicitudes_servicio,id',
+            // Solo se califica un servicio concreto (HU: "solo disponible con solicitud completada")
+            'solicitud_id' => 'required|integer',
             'calificacion' => 'required|integer|min:1|max:5',
-            'comentario' => 'required|string|max:1000',
+            'comentario' => 'required|string|min:3|max:1000',
+        ], [
+            'solicitud_id.required' => 'Solo puedes calificar un servicio que hayas solicitado.',
+            'calificacion.required' => 'Elige de 1 a 5 estrellas.',
+            'calificacion.min' => 'Elige de 1 a 5 estrellas.',
+            'calificacion.max' => 'Elige de 1 a 5 estrellas.',
+            'comentario.required' => 'Cuéntanos cómo te fue con el servicio.',
+            'comentario.min' => 'Cuéntanos un poco más sobre el servicio.',
         ]);
 
-        // Evitar reseñas duplicadas para la misma solicitud
-        if (!empty($datos['solicitud_id'])) {
-            $existe = Resena::where('cliente_id', $cliente->id)
-                ->where('solicitud_id', $datos['solicitud_id'])
-                ->first();
-            if ($existe) {
-                return response()->json(['mensaje' => 'Ya dejaste una reseña para este servicio.'], 409);
-            }
+        // La solicitud debe ser de este cliente, con este proveedor y estar completada
+        $solicitud = SolicitudServicio::where('id', $datos['solicitud_id'])
+            ->where('cliente_id', $cliente->id)
+            ->first();
+
+        if (!$solicitud || $solicitud->proveedor_id !== $datos['proveedor_id']) {
+            return response()->json(['mensaje' => 'No encontramos ese servicio entre tus solicitudes.'], 404);
+        }
+        if ($solicitud->estado !== 'completada') {
+            return response()->json([
+                'mensaje' => 'Podrás calificar al proveedor cuando el servicio esté completado.',
+            ], 422);
         }
 
-        $resena = Resena::create([
-            'cliente_id' => $cliente->id,
-            'proveedor_id' => $datos['proveedor_id'],
-            'solicitud_id' => $datos['solicitud_id'] ?? null,
-            'calificacion' => $datos['calificacion'],
-            'comentario' => $datos['comentario'],
-        ]);
+        // Una calificación por servicio (también la garantiza el índice único de solicitud_id)
+        if (Resena::where('solicitud_id', $solicitud->id)->exists()) {
+            return response()->json(['mensaje' => 'Ya calificaste este servicio.'], 409);
+        }
 
-        // Recalcular calificación promedio del proveedor
-        $this->recalcularCalificacion($datos['proveedor_id']);
+        try {
+            $resena = Resena::create([
+                'cliente_id' => $cliente->id,
+                'proveedor_id' => $solicitud->proveedor_id,
+                'solicitud_id' => $solicitud->id,
+                'calificacion' => $datos['calificacion'],
+                'comentario' => trim($datos['comentario']),
+            ]);
+        } catch (UniqueConstraintViolationException $e) {
+            return response()->json(['mensaje' => 'Ya calificaste este servicio.'], 409);
+        }
+
+        // Recalcular el promedio del proveedor (con detección de valores atípicos)
+        CalificacionProveedor::recalcular($solicitud->proveedor_id);
 
         // Notificar al proveedor
         Notificacion::crear(
@@ -167,11 +191,7 @@ class ResenaController extends Controller
             'esta_reportada' => false,
         ]);
 
-        if ($datos['accion'] === 'ocultar') {
-            $this->recalcularCalificacion($resena->proveedor_id);
-        } else {
-            $this->recalcularCalificacion($resena->proveedor_id);
-        }
+        CalificacionProveedor::recalcular($resena->proveedor_id);
 
         return response()->json(['mensaje' => $datos['accion'] === 'ocultar' ? 'Reseña ocultada.' : 'Reseña restaurada.']);
     }
@@ -193,24 +213,88 @@ class ResenaController extends Controller
 
         $proveedorId = $resena->proveedor_id;
         $resena->delete();
-        $this->recalcularCalificacion($proveedorId);
+        CalificacionProveedor::recalcular($proveedorId);
 
         return response()->json(['mensaje' => 'Reseña eliminada definitivamente.']);
     }
 
     /**
-     * Recalcula la calificación promedio del proveedor.
+     * Admin: reseñas atípicas (método IQR) con el contexto para "investigar el origen":
+     * el comentario, la solicitud y la distribución de calificaciones del proveedor.
+     * ?estado=pendientes (por defecto) | revisadas | todas
      */
-    private function recalcularCalificacion(string $proveedorId): void
+    public function listarAtipicas(Request $request)
     {
-        $datos = Resena::where('proveedor_id', $proveedorId)
-            ->where('esta_ocultada', false)
-            ->selectRaw('AVG(calificacion) as promedio, COUNT(*) as total')
-            ->first();
+        $admin = JWTAuth::user();
+        if (!$admin || $admin->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado.'], 403);
+        }
 
-        PerfilProveedor::where('usuario_id', $proveedorId)->update([
-            'calificacion' => round($datos->promedio ?? 0, 2),
-            'total_resenas' => $datos->total ?? 0,
+        $estado = $request->query('estado', 'pendientes');
+        $consulta = Resena::where('es_atipica', true)
+            ->where('esta_ocultada', false)
+            ->with([
+                'cliente:id,nombre,apellido',
+                'proveedor:id,nombre,apellido',
+                'solicitud:id,descripcion,fecha,estado,confirmacion_cliente,queja_cliente',
+            ])
+            ->orderByDesc('created_at');
+
+        if ($estado === 'pendientes') {
+            $consulta->whereNull('revision_atipica');
+        } elseif ($estado === 'revisadas') {
+            $consulta->whereNotNull('revision_atipica');
+        }
+
+        $resenas = $consulta->get();
+
+        // Distribución de cada proveedor involucrado (para el diagrama de caja)
+        $distribuciones = [];
+        foreach ($resenas->pluck('proveedor_id')->unique() as $proveedorId) {
+            $valores = Resena::where('proveedor_id', $proveedorId)
+                ->where('esta_ocultada', false)
+                ->pluck('calificacion')
+                ->map(fn ($v) => (float) $v)
+                ->all();
+            $distribuciones[$proveedorId] = CalificacionProveedor::limites($valores);
+        }
+
+        return response()->json($resenas->map(fn ($r) => $r->toArray() + [
+            'distribucion' => $distribuciones[$r->proveedor_id] ?? null,
+        ])->values());
+    }
+
+    /**
+     * Admin: decide qué hacer con una reseña atípica tras revisarla.
+     * - conservar: fue un fallo real y crítico del servicio, vuelve a contar en el promedio.
+     * - excluir: fue un error o un cliente "hater", sigue fuera del promedio (no se borra).
+     */
+    public function revisarAtipica(Request $request, $id)
+    {
+        $admin = JWTAuth::user();
+        if (!$admin || $admin->rol_id !== 3) {
+            return response()->json(['mensaje' => 'Acceso denegado.'], 403);
+        }
+
+        $datos = $request->validate(['decision' => 'required|in:conservar,excluir']);
+
+        $resena = Resena::find($id);
+        if (!$resena) {
+            return response()->json(['mensaje' => 'Reseña no encontrada.'], 404);
+        }
+
+        $resena->update([
+            'revision_atipica' => $datos['decision'],
+            'revisada_por' => $admin->id,
+            'revisada_en' => Carbon::now(),
+        ]);
+        CalificacionProveedor::recalcular($resena->proveedor_id);
+
+        return response()->json([
+            'mensaje' => $datos['decision'] === 'conservar'
+                ? 'La calificación vuelve a contar en el promedio del proveedor.'
+                : 'La calificación queda fuera del promedio del proveedor.',
+            'resena' => $resena->fresh(),
         ]);
     }
 }
