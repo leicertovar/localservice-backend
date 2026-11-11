@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\SolicitudServicio;
 use App\Models\Notificacion;
+use App\Models\Servicio;
+use App\Models\Usuario;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Carbon;
 
@@ -26,19 +28,54 @@ class SolicitudServicioController extends Controller
                 'mensaje' => 'No autorizado.'
             ], 401);
         }
+        if ($cliente->rol_id !== 1) {
+            return response()->json(['mensaje' => 'Solo los clientes pueden solicitar servicios.'], 403);
+        }
 
-        // Validar datos de entrada
+        // Validar datos de entrada (la hora es texto libre porque el panel web la escribe a mano)
         $datosValidados = $request->validate([
             'proveedor_id' => 'required|exists:usuarios,id',
             'servicio_id' => 'nullable|exists:servicios,id',
-            'fecha' => 'required|date',
-            'hora' => 'required|string|max:255',
-            'direccion' => 'required|string|max:255',
-            'descripcion' => 'required|string',
-            'telefono' => 'required|string|max:255',
-            'latitud' => 'nullable|numeric',
-            'longitud' => 'nullable|numeric',
+            'fecha' => 'required|date|after_or_equal:today',
+            'hora' => 'required|string|max:50',
+            'direccion' => 'required|string|min:5|max:255',
+            'descripcion' => 'required|string|min:10|max:1000',
+            'telefono' => 'required|string|min:7|max:30',
+            'latitud' => 'nullable|numeric|between:-90,90',
+            'longitud' => 'nullable|numeric|between:-180,180',
+        ], [
+            'fecha.required' => 'Elige la fecha en que necesitas el servicio.',
+            'fecha.after_or_equal' => 'La fecha no puede ser anterior a hoy.',
+            'hora.required' => 'Elige una hora.',
+            'direccion.required' => 'Escribe la dirección donde se hará el trabajo.',
+            'direccion.min' => 'Escribe una dirección más completa.',
+            'descripcion.required' => 'Describe el trabajo que necesitas.',
+            'descripcion.min' => 'Describe el trabajo con un poco más de detalle (mínimo 10 caracteres).',
+            'descripcion.max' => 'La descripción puede tener máximo 1000 caracteres.',
+            'telefono.required' => 'Escribe un teléfono de contacto.',
+            'telefono.min' => 'Escribe un teléfono válido.',
         ]);
+
+        // El proveedor debe existir, estar aprobado y con la cuenta activa
+        $proveedor = Usuario::find($datosValidados['proveedor_id']);
+        if (!$proveedor || $proveedor->rol_id !== 2 || !$proveedor->esta_aprobado
+            || $proveedor->desactivado_en || $proveedor->eliminado_en) {
+            return response()->json(['mensaje' => 'Este proveedor no está disponible en este momento.'], 422);
+        }
+
+        // Si se eligió un servicio, debe ser de ese proveedor y estar activo
+        if (!empty($datosValidados['servicio_id'])) {
+            $servicioValido = Servicio::where('id', $datosValidados['servicio_id'])
+                ->where('usuario_id', $proveedor->id)
+                ->where('esta_activo', true)
+                ->exists();
+            if (!$servicioValido) {
+                return response()->json([
+                    'mensaje' => 'Ese servicio ya no está disponible.',
+                    'errors' => ['servicio_id' => ['Ese servicio ya no está disponible. Elige otro.']],
+                ], 422);
+            }
+        }
 
         // Crear la solicitud
         $solicitud = SolicitudServicio::create([
@@ -54,6 +91,14 @@ class SolicitudServicioController extends Controller
             'longitud' => $datosValidados['longitud'] ?? null,
             'estado' => 'pendiente'
         ]);
+
+        // Avisar al proveedor de la nueva solicitud
+        Notificacion::crear(
+            $proveedor->id,
+            'solicitud',
+            'Nueva solicitud de servicio',
+            "{$cliente->nombre} te pidió una cotización para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.'
+        );
 
         return response()->json([
             'mensaje' => 'Solicitud de servicio enviada con éxito.',
@@ -103,8 +148,9 @@ class SolicitudServicioController extends Controller
         }
 
         // Obtener solicitudes
+        // "resena" indica si el cliente ya calificó el servicio (una calificación por servicio)
         $solicitudes = SolicitudServicio::where('cliente_id', $cliente->id)
-            ->with(['proveedor', 'servicio'])
+            ->with(['proveedor', 'servicio', 'resena:id,solicitud_id,calificacion'])
             ->orderBy('created_at', 'desc')
             ->get();
 

@@ -120,6 +120,9 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/admin/resenas-reportadas', [ResenaController::class, 'listarReportadas']);
     Route::patch('/admin/resenas/{id}/moderar', [ResenaController::class, 'moderarResena']);
     Route::delete('/admin/resenas/{id}', [ResenaController::class, 'eliminarResena']);
+    // Calificaciones atípicas (IQR): fuera del promedio hasta que el admin las revise
+    Route::get('/admin/resenas-atipicas', [ResenaController::class, 'listarAtipicas']);
+    Route::patch('/admin/resenas/{id}/atipica', [ResenaController::class, 'revisarAtipica']);
 
     // Proveedor: foto de perfil (incluida en PUT /proveedor/perfil, pero ruta dedicada si se necesita form-data)
     Route::post('/proveedor/foto-perfil', [\App\Http\Controllers\ProveedorController::class, 'actualizarPerfilProveedor']);

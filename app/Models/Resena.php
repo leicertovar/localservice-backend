@@ -20,11 +20,17 @@ class Resena extends Model
         'motivo_reporte',
         'reportado_por',
         'esta_ocultada',
+        'es_atipica',
+        'revision_atipica',
+        'revisada_por',
+        'revisada_en',
     ];
 
     protected $casts = [
         'esta_reportada' => 'boolean',
         'esta_ocultada' => 'boolean',
+        'es_atipica' => 'boolean',
+        'revisada_en' => 'datetime',
     ];
 
     public function cliente(): BelongsTo

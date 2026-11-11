@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class SolicitudServicio extends Model
 {
@@ -64,5 +65,13 @@ class SolicitudServicio extends Model
     public function servicio(): BelongsTo
     {
         return $this->belongsTo(Servicio::class, 'servicio_id', 'id');
+    }
+
+    /**
+     * Calificación que el cliente dejó para este servicio (una como máximo).
+     */
+    public function resena(): HasOne
+    {
+        return $this->hasOne(Resena::class, 'solicitud_id', 'id');
     }
 }
