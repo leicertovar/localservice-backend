@@ -14,6 +14,7 @@ use App\Models\Usuario;
 use App\Models\Rol;
 use App\Models\PerfilCliente;
 use App\Models\PerfilProveedor;
+use App\Models\SesionMovil;
 use App\Mail\ProveedorRegistradoMail;
 use App\Mail\ProveedorAprobadoMail;
 use App\Mail\ProveedorRechazadoMail;
@@ -783,6 +784,9 @@ class AuthController extends Controller
         $usuario = Usuario::where('email', $email)->first();
         $usuario->password = Hash::make($datosValidados['password']);
         $usuario->save();
+
+        // Quien recupera la contraseña puede haberla perdido por robo: cerrar las sesiones recordadas
+        SesionMovil::revocarDeUsuario($usuario->id, 'recuperacion_password');
 
         // 6. Eliminar el token usado para evitar dobles solicitudes
         DB::table('password_reset_tokens')->where('email', $email)->delete();

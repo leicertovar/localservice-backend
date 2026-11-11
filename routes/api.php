@@ -7,6 +7,7 @@ use App\Http\Controllers\NotificacionController;
 use App\Http\Controllers\MensajeController;
 use App\Http\Controllers\ClienteController;
 use App\Http\Controllers\CuentaController;
+use App\Http\Controllers\SesionMovilController;
 
 // Ruta básica para verificar el funcionamiento de la API
 Route::get('/prueba', function () {
@@ -26,6 +27,10 @@ Route::group([
     Route::post('/google',               [AuthController::class, 'iniciarSesionGoogle'])
         ->middleware('throttle:10,1,login-google');
     Route::post('/refrescar',            [AuthController::class, 'refrescarToken'])->name('auth.refrescar');
+
+    // "Recuérdame" de la app móvil: tokens de refresco rotativos (30 días, máximo 120)
+    Route::post('/movil/refrescar',     [SesionMovilController::class, 'refrescar'])->middleware('throttle:30,1,movil-refrescar');
+    Route::post('/movil/cerrar-sesion', [SesionMovilController::class, 'cerrar'])->middleware('throttle:30,1,movil-cerrar');
     Route::post('/recuperar-password',   [AuthController::class, 'solicitarRecuperacionPassword']);
     Route::post('/restablecer-password', [AuthController::class, 'restablecerPassword']);
 
@@ -43,6 +48,7 @@ Route::group([
         // Rutas de sesión del usuario
         Route::post('/cerrar-sesion', [AuthController::class, 'cerrarSesion']);
         Route::get('/mi-perfil',      [AuthController::class, 'obtenerUsuarioAutenticado']);
+        Route::post('/movil/sesion',  [SesionMovilController::class, 'crear'])->middleware('throttle:10,1,movil-sesion');
 
         // Gestión de la propia cuenta (app móvil)
         Route::post('/cambiar-password',   [CuentaController::class, 'cambiarPassword'])->middleware('throttle:10,1,cambiar-password');
