@@ -11,6 +11,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Carbon;
 use App\Models\Notificacion;
 use App\Models\PerfilCliente;
+use App\Models\SesionMovil;
 use App\Models\SolicitudServicio;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
@@ -58,6 +59,9 @@ class CuentaController extends Controller
         DB::table('password_reset_tokens')->where('email', $usuario->email)->delete();
         DB::table('codigos_recuperacion')->where('email', $usuario->email)->delete();
 
+        // Los teléfonos con "Recuérdame" deben volver a iniciar sesión (la app actual pide una nueva)
+        SesionMovil::revocarDeUsuario($usuario->id, 'cambio_password');
+
         return response()->json(['mensaje' => 'Tu contraseña se actualizó correctamente.']);
     }
 
@@ -73,6 +77,7 @@ class CuentaController extends Controller
 
         $usuario->desactivado_en = Carbon::now();
         $usuario->save();
+        SesionMovil::revocarDeUsuario($usuario->id, 'cuenta_desactivada');
         $this->invalidarTokenActual();
 
         return response()->json([
@@ -140,6 +145,7 @@ class CuentaController extends Controller
             $usuario->password = Hash::make(Str::random(40));
             $usuario->eliminado_en = Carbon::now();
             $usuario->save();
+            SesionMovil::revocarDeUsuario($usuario->id, 'cuenta_eliminada');
         });
 
         // 5. Fuera de la transacción: borrar la foto del disco e invalidar la sesión
