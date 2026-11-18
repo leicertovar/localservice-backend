@@ -12,6 +12,10 @@ En el mismo proyecto de Railway: **New → GitHub Repo →** el mismo repositori
 - **Start command:** `php artisan reverb:start --host=0.0.0.0 --port=$PORT`
 - **Networking → Generate Domain** (dominio público, p. ej. `localservice-reverb.up.railway.app`).
 - No necesita migraciones ni volumen.
+- Reverb requiere la extensión PHP **pcntl** (señales de apagado). Está declarada en `composer.json`
+  (`"ext-pcntl": "*"`) para que Railway la instale; sin ella el arranque falla con
+  `Undefined constant ...\SIGINT`. En Windows no existe: en local usar
+  `composer install --ignore-platform-req=ext-pcntl`.
 
 ## 2. Variables
 
