@@ -5,6 +5,8 @@ return [
     'allowed_methods'   => ['*'],
     'allowed_origins'   => [
         rtrim(env('FRONTEND_URL', 'http://localhost:8080'), '/'),  // Frontend web
+        'https://local-service.site', // Frontend web
+        'https://local-service.up.railway.app', // Frontend web
         'http://localhost:5173',  // App móvil: npm run dev (Vite)
         'http://localhost:8100',  // App móvil: ionic serve
         'https://localhost',      // App móvil: Capacitor Android
