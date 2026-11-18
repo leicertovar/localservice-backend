@@ -71,6 +71,7 @@ class ProveedorController extends Controller
         // Obtener los servicios activos asociados a este proveedor
         $servicios = $proveedor->id ? \App\Models\Servicio::where('usuario_id', $proveedor->id)
             ->where('esta_activo', true)
+            ->with('imagenesVisibles:id,servicio_id,ruta,orden')
             ->get() : [];
 
         // Ruta pública: nunca exponer los documentos de identidad ni la nota de rechazo

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Servicio extends Model
 {
@@ -36,5 +37,17 @@ class Servicio extends Model
     public function proveedor(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'usuario_id', 'id');
+    }
+
+    /** Todas las fotos (el proveedor ve también las ocultadas por el administrador). */
+    public function imagenes(): HasMany
+    {
+        return $this->hasMany(ServicioImagen::class, 'servicio_id')->orderBy('orden');
+    }
+
+    /** Fotos visibles para los clientes. */
+    public function imagenesVisibles(): HasMany
+    {
+        return $this->imagenes()->where('esta_ocultada', false);
     }
 }

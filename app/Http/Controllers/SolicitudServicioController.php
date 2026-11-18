@@ -110,7 +110,8 @@ class SolicitudServicioController extends Controller
             $proveedor->id,
             'solicitud',
             'Nueva solicitud de servicio',
-            "{$cliente->nombre} te pidió una cotización para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.' . $avisoZona
+            "{$cliente->nombre} te pidió una cotización para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.' . $avisoZona,
+            "solicitud:{$solicitud->id}"
         );
 
         $solicitud->setAttribute('zona_atencion', $zona);
@@ -278,7 +279,8 @@ class SolicitudServicioController extends Controller
                 $solicitud->cliente_id,
                 'solicitud',
                 'Solicitud aceptada',
-                "{$usuario->nombre} aceptó tu solicitud para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.'
+                "{$usuario->nombre} aceptó tu solicitud para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.',
+                "solicitud:{$solicitud->id}"
             );
 
             return response()->json(['mensaje' => 'Aceptaste el trabajo.', 'solicitud' => $solicitud->fresh()]);
@@ -293,7 +295,8 @@ class SolicitudServicioController extends Controller
             $solicitud->proveedor_id,
             'solicitud',
             'Cotización aceptada',
-            "{$usuario->nombre} aceptó tu cotización para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.'
+            "{$usuario->nombre} aceptó tu cotización para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.',
+            "solicitud:{$solicitud->id}"
         );
 
         return response()->json([
@@ -332,7 +335,8 @@ class SolicitudServicioController extends Controller
             $solicitud->cliente_id,
             'solicitud',
             'Solicitud rechazada',
-            "{$usuario->nombre} no puede atender tu solicitud. Busca otro proveedor disponible."
+            "{$usuario->nombre} no puede atender tu solicitud. Busca otro proveedor disponible.",
+            "solicitud:{$solicitud->id}"
         );
 
         return response()->json(['mensaje' => 'Solicitud rechazada.', 'solicitud' => $solicitud->fresh()]);
@@ -385,7 +389,8 @@ class SolicitudServicioController extends Controller
             $solicitud->cliente_id,
             'solicitud',
             'Servicio en curso',
-            "{$proveedor->nombre} empezó a trabajar en tu servicio."
+            "{$proveedor->nombre} empezó a trabajar en tu servicio.",
+            "solicitud:{$solicitud->id}"
         );
 
         return response()->json(['mensaje' => 'Servicio iniciado.', 'solicitud' => $solicitud->fresh()]);
@@ -432,7 +437,8 @@ class SolicitudServicioController extends Controller
             $solicitud->cliente_id,
             'sistema',
             'Servicio completado',
-            "El proveedor marcó el servicio como completado. Por favor confirma si está de acuerdo."
+            "El proveedor marcó el servicio como completado. Por favor confirma si está de acuerdo.",
+            "solicitud:{$solicitud->id}"
         );
 
         return response()->json(['mensaje' => 'Servicio marcado como completado.', 'solicitud' => $solicitud->fresh()]);
@@ -482,7 +488,8 @@ class SolicitudServicioController extends Controller
                 $solicitud->proveedor_id,
                 'pago',
                 'Servicio confirmado',
-                "{$cliente->nombre} confirmó el servicio completado. ¡El pago queda registrado!"
+                "{$cliente->nombre} confirmó el servicio completado. ¡El pago queda registrado!",
+                "solicitud:{$solicitud->id}"
             );
         } else {
             // Rechazar: abrir disputa
@@ -498,7 +505,8 @@ class SolicitudServicioController extends Controller
                 $solicitud->proveedor_id,
                 'sistema',
                 'Disputa abierta',
-                "{$cliente->nombre} rechazó el servicio. Motivo: " . ($datos['queja'] ?? 'Sin descripción') . ". Tienes 48h para aportar tu evidencia."
+                "{$cliente->nombre} rechazó el servicio. Motivo: " . ($datos['queja'] ?? 'Sin descripción') . ". Tienes 48h para aportar tu evidencia.",
+                "solicitud:{$solicitud->id}"
             );
 
             // Notificar al admin
@@ -508,7 +516,8 @@ class SolicitudServicioController extends Controller
                     $admin->id,
                     'sistema',
                     'Disputa de servicio',
-                    "El cliente {$cliente->nombre} reportó que el proveedor intenta confirmar un trabajo incompleto. Solicitud #{$solicitud->id}."
+                    "El cliente {$cliente->nombre} reportó que el proveedor intenta confirmar un trabajo incompleto. Solicitud #{$solicitud->id}.",
+                    "solicitud:{$solicitud->id}"
                 );
             }
         }
@@ -558,7 +567,8 @@ class SolicitudServicioController extends Controller
                 $admin->id,
                 'sistema',
                 'Disputa lista para resolver',
-                "El proveedor {$proveedor->nombre} aportó evidencia en la disputa #{$solicitud->id}. Requiere tu decisión final."
+                "El proveedor {$proveedor->nombre} aportó evidencia en la disputa #{$solicitud->id}. Requiere tu decisión final.",
+                "solicitud:{$solicitud->id}"
             );
         }
 
@@ -603,7 +613,8 @@ class SolicitudServicioController extends Controller
             $datos['resolucion'] === 'aprobado' ? 'Disputa resuelta a tu favor' : 'Disputa resuelta en contra',
             $datos['resolucion'] === 'aprobado'
                 ? "El administrador aprobó el trabajo. El pago queda confirmado. " . ($datos['nota'] ?? '')
-                : "El administrador determinó que el trabajo no fue completado correctamente. " . ($datos['nota'] ?? '')
+                : "El administrador determinó que el trabajo no fue completado correctamente. " . ($datos['nota'] ?? ''),
+                "solicitud:{$solicitud->id}"
         );
 
         // Notificar al cliente
@@ -613,7 +624,8 @@ class SolicitudServicioController extends Controller
             'Resolución de disputa',
             $datos['resolucion'] === 'aprobado'
                 ? "El administrador revisó la evidencia y aprobó el trabajo del proveedor. " . ($datos['nota'] ?? '')
-                : "El administrador revisó la evidencia y determinó que el trabajo fue insatisfactorio. " . ($datos['nota'] ?? '')
+                : "El administrador revisó la evidencia y determinó que el trabajo fue insatisfactorio. " . ($datos['nota'] ?? ''),
+                "solicitud:{$solicitud->id}"
         );
 
         return response()->json(['mensaje' => 'Disputa resuelta correctamente.', 'solicitud' => $solicitud->fresh()]);
@@ -729,7 +741,8 @@ class SolicitudServicioController extends Controller
             'solicitud',
             'Solicitud cancelada',
             "{$cliente->nombre} canceló la solicitud del " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.'
-                . ($motivo ? " Motivo: {$motivo}." : '')
+                . ($motivo ? " Motivo: {$motivo}." : ''),
+                "solicitud:{$solicitud->id}"
         );
 
         return response()->json(['mensaje' => 'Solicitud cancelada.', 'solicitud' => $solicitud->fresh()]);
@@ -744,7 +757,8 @@ class SolicitudServicioController extends Controller
             $solicitud->cliente_id,
             'solicitud',
             'Cotización recibida',
-            "Tu proveedor envió una cotización de $" . number_format((int) $solicitud->monto_cotizado, 0, ',', '.') . ". ¡Revísala!"
+            "Tu proveedor envió una cotización de $" . number_format((int) $solicitud->monto_cotizado, 0, ',', '.') . ". ¡Revísala!",
+            "solicitud:{$solicitud->id}"
         );
     }
 }

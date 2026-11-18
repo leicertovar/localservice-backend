@@ -9,6 +9,9 @@ use App\Services\CalificacionProveedor;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use App\Models\Notificacion;
+use App\Models\ResenaImagen;
+use App\Support\Imagenes;
+use Illuminate\Support\Facades\DB;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class ResenaController extends Controller
@@ -20,7 +23,31 @@ class ResenaController extends Controller
     {
         $resenas = Resena::where('proveedor_id', $proveedorId)
             ->where('esta_ocultada', false)
-            ->with('cliente:id,nombre,apellido')
+            ->with(['cliente:id,nombre,apellido', 'imagenesVisibles:id,resena_id,ruta,orden', 'solicitud:id,servicio_id', 'solicitud.servicio:id,nombre'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json($resenas);
+    }
+
+    /**
+     * El cliente ve las reseñas que ha escrito (con la respuesta del proveedor).
+     */
+    public function misResenas()
+    {
+        $cliente = JWTAuth::user();
+        if (!$cliente) {
+            return response()->json(['mensaje' => 'No autorizado.'], 401);
+        }
+
+        $resenas = Resena::where('cliente_id', $cliente->id)
+            ->with([
+                'proveedor:id,nombre,apellido',
+                'proveedor.perfilProveedor:id,usuario_id,categoria_servicio,foto_perfil',
+                'imagenes:id,resena_id,ruta,orden,esta_ocultada',
+                'solicitud:id,servicio_id,fecha',
+                'solicitud.servicio:id,nombre',
+            ])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -44,7 +71,9 @@ class ResenaController extends Controller
             'solicitud_id' => 'required|integer',
             'calificacion' => 'required|integer|min:1|max:5',
             'comentario' => 'required|string|min:3|max:1000',
+            ...Imagenes::reglas(),
         ], [
+            ...Imagenes::mensajes(),
             'solicitud_id.required' => 'Solo puedes calificar un servicio que hayas solicitado.',
             'calificacion.required' => 'Elige de 1 a 5 estrellas.',
             'calificacion.min' => 'Elige de 1 a 5 estrellas.',
@@ -66,21 +95,39 @@ class ResenaController extends Controller
                 'mensaje' => 'Podrás calificar al proveedor cuando el servicio esté completado.',
             ], 422);
         }
+        // Igual que en la web: primero el cliente confirma que el trabajo quedó bien.
+        // Si abrió una disputa, podrá calificar cuando el administrador la resuelva.
+        if ($solicitud->confirmacion_cliente !== 'aceptado' && $solicitud->estado_disputa !== 'resuelto') {
+            return response()->json([
+                'mensaje' => $solicitud->estado_disputa
+                    ? 'Podrás calificar cuando el administrador resuelva la disputa.'
+                    : 'Primero confirma que el servicio quedó bien.',
+            ], 422);
+        }
 
         // Una calificación por servicio (también la garantiza el índice único de solicitud_id)
         if (Resena::where('solicitud_id', $solicitud->id)->exists()) {
             return response()->json(['mensaje' => 'Ya calificaste este servicio.'], 409);
         }
 
+        $rutas = [];
         try {
-            $resena = Resena::create([
-                'cliente_id' => $cliente->id,
-                'proveedor_id' => $solicitud->proveedor_id,
-                'solicitud_id' => $solicitud->id,
-                'calificacion' => $datos['calificacion'],
-                'comentario' => trim($datos['comentario']),
-            ]);
+            $resena = DB::transaction(function () use ($cliente, $solicitud, $datos, $request, &$rutas) {
+                $resena = Resena::create([
+                    'cliente_id' => $cliente->id,
+                    'proveedor_id' => $solicitud->proveedor_id,
+                    'solicitud_id' => $solicitud->id,
+                    'calificacion' => $datos['calificacion'],
+                    'comentario' => trim($datos['comentario']),
+                ]);
+                foreach (array_values($request->file('imagenes', [])) as $orden => $archivo) {
+                    $rutas[] = $ruta = Imagenes::guardar($archivo, 'resenas');
+                    ResenaImagen::create(['resena_id' => $resena->id, 'ruta' => $ruta, 'orden' => $orden]);
+                }
+                return $resena;
+            });
         } catch (UniqueConstraintViolationException $e) {
+            array_walk($rutas, fn ($r) => Imagenes::borrar($r));
             return response()->json(['mensaje' => 'Ya calificaste este servicio.'], 409);
         }
 
@@ -92,10 +139,14 @@ class ResenaController extends Controller
             $datos['proveedor_id'],
             'resena',
             'Nueva calificación recibida',
-            "{$cliente->nombre} te calificó con {$datos['calificacion']} estrellas."
+            "{$cliente->nombre} te calificó con {$datos['calificacion']} estrellas.",
+            "resena:{$resena->id}"
         );
 
-        return response()->json(['mensaje' => 'Reseña publicada con éxito.', 'resena' => $resena->load('cliente:id,nombre,apellido')], 201);
+        return response()->json([
+            'mensaje' => 'Reseña publicada con éxito.',
+            'resena' => $resena->load(['cliente:id,nombre,apellido', 'imagenes:id,resena_id,ruta,orden,esta_ocultada']),
+        ], 201);
     }
 
     /**
@@ -110,9 +161,22 @@ class ResenaController extends Controller
             return response()->json(['mensaje' => 'Reseña no encontrada.'], 404);
         }
 
-        $datos = $request->validate(['respuesta' => 'required|string|max:1000']);
-
-        $resena->update(['respuesta_proveedor' => $datos['respuesta']]);
+        $datos = $request->validate(['respuesta' => 'required|string|min:2|max:1000'], [
+            'respuesta.required' => 'Escribe tu respuesta.',
+            'respuesta.min' => 'Escribe tu respuesta.',
+            'respuesta.max' => 'La respuesta puede tener máximo 1000 caracteres.',
+        ]);
+        $primeraVez = !$resena->respuesta_proveedor;
+        $resena->update(['respuesta_proveedor' => trim($datos['respuesta'])]);
+        if ($primeraVez) {
+            Notificacion::crear(
+                $resena->cliente_id,
+                'resena',
+                'Respondieron tu reseña',
+                "{$proveedor->nombre} respondió a tu calificación.",
+                "resena:{$resena->id}"
+            );
+        }
 
         return response()->json(['mensaje' => 'Respuesta publicada.', 'resena' => $resena]);
     }
@@ -162,7 +226,7 @@ class ResenaController extends Controller
         }
 
         $resenas = Resena::where('esta_reportada', true)
-            ->with(['cliente:id,nombre,apellido', 'proveedor:id,nombre,apellido'])
+            ->with(['cliente:id,nombre,apellido', 'proveedor:id,nombre,apellido', 'imagenes:id,resena_id,ruta,orden,esta_ocultada'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -212,7 +276,9 @@ class ResenaController extends Controller
         }
 
         $proveedorId = $resena->proveedor_id;
+        $rutas = $resena->imagenes()->pluck('ruta');
         $resena->delete();
+        $rutas->each(fn ($r) => Imagenes::borrar($r));
         CalificacionProveedor::recalcular($proveedorId);
 
         return response()->json(['mensaje' => 'Reseña eliminada definitivamente.']);

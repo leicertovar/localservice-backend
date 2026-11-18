@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Servicio;
+use App\Models\ServicioImagen;
+use App\Models\DenunciaImagen;
+use App\Support\Imagenes;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class ServicioController extends Controller
@@ -25,7 +28,11 @@ class ServicioController extends Controller
         }
 
         // Obtener servicios del proveedor
-        $servicios = Servicio::where('usuario_id', $usuario->id)->orderBy('created_at', 'desc')->get();
+        // El proveedor ve todas sus fotos, también las que el administrador ocultó
+        $servicios = Servicio::where('usuario_id', $usuario->id)
+            ->with('imagenes:id,servicio_id,ruta,orden,esta_ocultada')
+            ->orderBy('created_at', 'desc')
+            ->get();
 
         return response()->json($servicios);
     }
@@ -72,7 +79,7 @@ class ServicioController extends Controller
 
         return response()->json([
             'mensaje' => 'Servicio creado con éxito.',
-            'servicio' => $servicio
+            'servicio' => $servicio->load('imagenes')
         ], 201);
     }
 
@@ -163,8 +170,10 @@ class ServicioController extends Controller
             ], 404);
         }
 
-        // Eliminar de forma definitiva
+        // Eliminar de forma definitiva (también sus fotos del disco)
+        $rutas = $servicio->imagenes()->pluck('ruta');
         $servicio->delete();
+        $rutas->each(fn ($r) => Imagenes::borrar($r));
 
         return response()->json([
             'mensaje' => 'Servicio eliminado correctamente.'
@@ -205,5 +214,62 @@ class ServicioController extends Controller
             'mensaje' => $servicio->esta_activo ? 'Servicio activado.' : 'Servicio desactivado.',
             'servicio' => $servicio
         ]);
+    }
+
+    /**
+     * Agrega fotos a un servicio propio (máximo 3 en total). multipart: imagenes[]
+     */
+    public function subirImagenes(Request $request, $id)
+    {
+        $usuario = JWTAuth::user();
+        $servicio = $usuario ? Servicio::where('id', $id)->where('usuario_id', $usuario->id)->first() : null;
+        if (!$servicio) {
+            return response()->json(['mensaje' => 'Servicio no encontrado.'], 404);
+        }
+
+        $disponibles = Imagenes::MAXIMO - $servicio->imagenes()->count();
+        if ($disponibles <= 0) {
+            return response()->json(['mensaje' => 'Este servicio ya tiene ' . Imagenes::MAXIMO . ' fotos. Quita una para subir otra.'], 422);
+        }
+        $request->validate(['imagenes' => 'required|array|min:1', ...Imagenes::reglas($disponibles)], [
+            'imagenes.required' => 'Elige al menos una foto.',
+            ...Imagenes::mensajes($disponibles),
+        ]);
+
+        $orden = (int) $servicio->imagenes()->max('orden') + 1;
+        foreach ($request->file('imagenes') as $archivo) {
+            ServicioImagen::create([
+                'servicio_id' => $servicio->id,
+                'ruta' => Imagenes::guardar($archivo, 'servicios'),
+                'orden' => $orden++,
+            ]);
+        }
+
+        return response()->json([
+            'mensaje' => 'Fotos agregadas.',
+            'servicio' => $servicio->load('imagenes:id,servicio_id,ruta,orden,esta_ocultada'),
+        ], 201);
+    }
+
+    /**
+     * Quita una foto de un servicio propio.
+     */
+    public function eliminarImagen($id, $imagenId)
+    {
+        $usuario = JWTAuth::user();
+        $imagen = ServicioImagen::where('id', $imagenId)
+            ->where('servicio_id', $id)
+            ->whereHas('servicio', fn ($q) => $q->where('usuario_id', $usuario?->id))
+            ->first();
+        if (!$imagen) {
+            return response()->json(['mensaje' => 'Foto no encontrada.'], 404);
+        }
+
+        Imagenes::borrar($imagen->ruta);
+        $imagen->delete();
+        // Sus denuncias pendientes ya no aplican
+        DenunciaImagen::where('tipo', 'servicio')->where('imagen_id', $imagen->id)->delete();
+
+        return response()->json(['mensaje' => 'Foto eliminada.']);
     }
 }
