@@ -11,6 +11,11 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // Tiempo real (Reverb): POST /api/broadcasting/auth autoriza los canales privados con el JWT
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        ['prefix' => 'api', 'middleware' => ['api', 'auth:api']],
+    )
     ->withMiddleware(function (Middleware $middleware): void {
         // Rechaza tokens de cuentas desactivadas o eliminadas por su dueño
         $middleware->appendToGroup('api', \App\Http\Middleware\CuentaActiva::class);
