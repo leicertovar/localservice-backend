@@ -22,8 +22,14 @@ class ProveedorController extends Controller
             ->with('perfilProveedor')
             ->get();
 
+        // Servicios activos de cada proveedor, para buscar también por lo que ofrece
+        $servicios = \App\Models\Servicio::whereIn('usuario_id', $proveedores->pluck('id'))
+            ->where('esta_activo', true)
+            ->get(['usuario_id', 'nombre', 'descripcion', 'categoria'])
+            ->groupBy('usuario_id');
+
         // Mapear al formato que espera el frontend
-        $respuesta = $proveedores->map(function($p) {
+        $respuesta = $proveedores->map(function($p) use ($servicios) {
             $perfil = $p->perfilProveedor;
             return [
                 'id' => $p->id,
@@ -42,6 +48,14 @@ class ProveedorController extends Controller
                 // Zona de trabajo declarada por el proveedor
                 'radio_cobertura_km' => $perfil?->radio_cobertura_km,
                 'barrios_cobertura' => $perfil?->barrios_cobertura ?? [],
+                // Para la búsqueda por palabras clave (app móvil)
+                'biografia' => $perfil?->biografia,
+                'habilidades' => $perfil?->habilidades,
+                'servicios' => ($servicios[$p->id] ?? collect())->map(fn ($s) => [
+                    'nombre' => $s->nombre,
+                    'descripcion' => $s->descripcion,
+                    'categoria' => $s->categoria,
+                ])->values(),
                 'latitud' => $perfil?->latitud,
                 'longitud' => $perfil?->longitud,
             ];

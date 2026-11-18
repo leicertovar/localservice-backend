@@ -7,6 +7,8 @@ use App\Models\Mensaje;
 use App\Models\Notificacion;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
+use App\Events\MensajeEnviado;
 
 class MensajeController extends Controller
 {
@@ -103,6 +105,14 @@ class MensajeController extends Controller
             "{$usuario->nombre}: " . ($contenido ? mb_substr($contenido, 0, 80) : "📎 Archivo adjunto"),
             "chat:{$usuario->id}"
         );
+
+        // Tiempo real: si Reverb no responde, el mensaje ya quedó guardado y los clientes
+        // lo reciben con la consulta periódica de respaldo.
+        try {
+            broadcast(new MensajeEnviado($mensaje));
+        } catch (\Throwable $e) {
+            Log::warning('No se pudo emitir el mensaje en tiempo real: ' . $e->getMessage());
+        }
 
         return response()->json($mensaje->load('emisor:id,nombre,apellido'), 201);
     }
