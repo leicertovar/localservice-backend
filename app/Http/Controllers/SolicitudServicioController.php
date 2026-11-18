@@ -761,4 +761,50 @@ class SolicitudServicioController extends Controller
             "solicitud:{$solicitud->id}"
         );
     }
+
+    /**
+     * Historial de servicios terminados del usuario (como cliente o como proveedor), paginado.
+     * GET /historial?estado=todos|completada|cancelada|rechazada&desde=AAAA-MM-DD&hasta=AAAA-MM-DD&page=1
+     */
+    public function historial(Request $request)
+    {
+        $usuario = JWTAuth::user();
+        if (!$usuario || !in_array($usuario->rol_id, [1, 2], true)) {
+            return response()->json(['mensaje' => 'Solo clientes y proveedores tienen historial de servicios.'], 403);
+        }
+
+        $datos = $request->validate([
+            'estado' => 'nullable|in:todos,completada,cancelada,rechazada',
+            'desde' => 'nullable|date',
+            'hasta' => 'nullable|date|after_or_equal:desde',
+            'por_pagina' => 'nullable|integer|min:5|max:50',
+        ], [
+            'estado.in' => 'Elige un estado válido.',
+            'desde.date' => 'La fecha inicial no es válida.',
+            'hasta.date' => 'La fecha final no es válida.',
+            'hasta.after_or_equal' => 'La fecha final debe ser igual o posterior a la inicial.',
+        ]);
+
+        $estados = ($datos['estado'] ?? 'todos') === 'todos'
+            ? ['completada', 'cancelada', 'rechazada']
+            : [$datos['estado']];
+        $campo = $usuario->rol_id === 2 ? 'proveedor_id' : 'cliente_id';
+
+        $consulta = SolicitudServicio::where($campo, $usuario->id)
+            ->whereIn('estado', $estados)
+            ->when($datos['desde'] ?? null, fn ($q, $desde) => $q->whereDate('fecha', '>=', $desde))
+            ->when($datos['hasta'] ?? null, fn ($q, $hasta) => $q->whereDate('fecha', '<=', $hasta))
+            ->with([
+                'cliente:id,nombre,apellido,telefono',
+                'proveedor:id,nombre,apellido',
+                'proveedor.perfilProveedor:id,usuario_id,categoria_servicio,foto_perfil',
+                'servicio',
+                'resena:id,solicitud_id,calificacion',
+                'eventos',
+            ])
+            ->orderByDesc('fecha')
+            ->orderByDesc('id');
+
+        return response()->json($consulta->paginate($datos['por_pagina'] ?? 10));
+    }
 }

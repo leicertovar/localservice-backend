@@ -94,6 +94,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/solicitudes', [\App\Http\Controllers\SolicitudServicioController::class, 'crearSolicitud']);
     Route::get('/proveedor/solicitudes', [\App\Http\Controllers\SolicitudServicioController::class, 'obtenerSolicitudesProveedor']);
     Route::get('/cliente/solicitudes', [\App\Http\Controllers\SolicitudServicioController::class, 'obtenerSolicitudesCliente']);
+    Route::get('/historial', [\App\Http\Controllers\SolicitudServicioController::class, 'historial']);
     Route::post('/solicitudes/{id}/cotizar', [\App\Http\Controllers\SolicitudServicioController::class, 'cotizarSolicitud']);
     Route::post('/solicitudes/{id}/aceptar', [\App\Http\Controllers\SolicitudServicioController::class, 'aceptarCotizacion']);
     Route::post('/solicitudes/{id}/rechazar', [\App\Http\Controllers\SolicitudServicioController::class, 'rechazarSolicitud']);

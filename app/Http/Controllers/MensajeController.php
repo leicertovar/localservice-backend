@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\Mensaje;
 use App\Models\Notificacion;
 use Tymon\JWTAuth\Facades\JWTAuth;
+use Illuminate\Support\Str;
 
 class MensajeController extends Controller
 {
@@ -44,8 +45,17 @@ class MensajeController extends Controller
         $datos = $request->validate([
             'receptor_id' => 'required|exists:usuarios,id',
             'contenido' => 'nullable|string|max:2000',
-            'archivo' => 'nullable|file|max:20480', // 20MB
+            // Solo fotos, videos y documentos comunes: nada que el servidor pueda ejecutar o
+            // servir como página (.php, .html, .svg…). Máximo 20 MB.
+            'archivo' => 'nullable|file|max:20480|mimes:jpg,jpeg,png,webp,gif,mp4,mov,webm,pdf,doc,docx,xls,xlsx,txt',
+        ], [
+            'contenido.max' => 'El mensaje puede tener máximo 2000 caracteres.',
+            'archivo.max' => 'El archivo puede pesar máximo 20 MB.',
+            'archivo.mimes' => 'Puedes enviar fotos, videos, PDF, Word, Excel o texto.',
         ]);
+        if ($datos['receptor_id'] === $usuario->id) {
+            return response()->json(['mensaje' => 'No puedes enviarte mensajes a ti mismo.'], 422);
+        }
 
         $tipo = 'texto';
         $urlArchivo = null;
@@ -63,12 +73,14 @@ class MensajeController extends Controller
                 $tipo = 'documento';
             }
 
-            $nombreArchivo = $archivo->getClientOriginalName();
-            $ruta = $archivo->storeAs('chat', time() . '_' . preg_replace('/\s+/', '_', $nombreArchivo), 'public');
+            // El nombre original solo se muestra; en el disco se guarda con un nombre aleatorio
+            $nombreArchivo = mb_substr($archivo->getClientOriginalName(), 0, 150);
+            $extension = strtolower($archivo->guessExtension() ?: $archivo->getClientOriginalExtension());
+            $ruta = $archivo->storeAs('chat', Str::uuid() . '.' . $extension, 'public');
             $urlArchivo = '/storage/' . $ruta;
         }
 
-        $contenido = $datos['contenido'] ?? null;
+        $contenido = isset($datos['contenido']) ? trim($datos['contenido']) : null;
 
         if (!$contenido && !$urlArchivo) {
             return response()->json(['mensaje' => 'Debes enviar texto o un archivo.'], 422);
@@ -88,7 +100,8 @@ class MensajeController extends Controller
             $datos['receptor_id'],
             'mensaje',
             'Nuevo mensaje',
-            "{$usuario->nombre}: " . ($contenido ? substr($contenido, 0, 80) : "📎 Archivo adjunto")
+            "{$usuario->nombre}: " . ($contenido ? mb_substr($contenido, 0, 80) : "📎 Archivo adjunto"),
+            "chat:{$usuario->id}"
         );
 
         return response()->json($mensaje->load('emisor:id,nombre,apellido'), 201);
