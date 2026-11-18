@@ -47,7 +47,9 @@ class AuthController extends Controller
             'doc_diploma' => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
             // Zona de cobertura del proveedor (app móvil; opcional para el registro web)
             'ciudad' => 'nullable|string|max:255',
-            'radio_cobertura_km' => 'nullable|integer|min:1|max:100',
+            'radio_cobertura_km' => 'nullable|integer|min:1|max:30',
+            'latitud' => 'nullable|numeric|between:-90,90|required_with:longitud',
+            'longitud' => 'nullable|numeric|between:-180,180|required_with:latitud',
             'barrios_cobertura' => 'nullable|array|max:30',
             'barrios_cobertura.*' => 'string|max:100',
         ]);
@@ -103,6 +105,8 @@ class AuthController extends Controller
                 'ciudad' => $datosValidados['ciudad'] ?? null,
                 'radio_cobertura_km' => $datosValidados['radio_cobertura_km'] ?? null,
                 'barrios_cobertura' => $datosValidados['barrios_cobertura'] ?? null,
+                'latitud' => $datosValidados['latitud'] ?? null,
+                'longitud' => $datosValidados['longitud'] ?? null,
                 'doc_cedula'  => $guardarDoc('doc_cedula'),
                 'doc_rut'     => $guardarDoc('doc_rut'),
                 'doc_diploma' => $guardarDoc('doc_diploma'),

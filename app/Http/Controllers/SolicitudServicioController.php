@@ -10,6 +10,8 @@ use App\Models\Usuario;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
+use App\Models\PerfilProveedor;
+use App\Support\ZonaAtencion;
 
 class SolicitudServicioController extends Controller
 {
@@ -37,7 +39,8 @@ class SolicitudServicioController extends Controller
         $datosValidados = $request->validate([
             'proveedor_id' => 'required|exists:usuarios,id',
             'servicio_id' => 'nullable|exists:servicios,id',
-            'fecha' => 'required|date|after_or_equal:today',
+            // "Hoy" en Colombia: el servidor trabaja en UTC y de noche ya sería el día siguiente
+            'fecha' => 'required|date|after_or_equal:' . self::hoyLocal(),
             'hora' => 'required|string|max:50',
             'direccion' => 'required|string|min:5|max:255',
             'descripcion' => 'required|string|min:10|max:1000',
@@ -95,13 +98,22 @@ class SolicitudServicioController extends Controller
 
         $solicitud->eventos()->create(['estado' => 'pendiente', 'actor_id' => $cliente->id]);
 
-        // Avisar al proveedor de la nueva solicitud
+        // Avisar al proveedor de la nueva solicitud (y si queda fuera de su radio)
+        $zona = ZonaAtencion::evaluar($proveedor->perfilProveedor, $solicitud->latitud, $solicitud->longitud);
+        $km = $zona ? number_format($zona['distancia_km'], 1, ',', '.') : null;
+        $avisoZona = $zona
+            ? ($zona['dentro']
+                ? " Está dentro de tu zona (a {$km} km)."
+                : " Ojo: está fuera de tu zona, a {$km} km (tu radio es de {$zona['radio_km']} km).")
+            : '';
         Notificacion::crear(
             $proveedor->id,
             'solicitud',
             'Nueva solicitud de servicio',
-            "{$cliente->nombre} te pidió una cotización para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.'
+            "{$cliente->nombre} te pidió una cotización para el " . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.' . $avisoZona
         );
+
+        $solicitud->setAttribute('zona_atencion', $zona);
 
         return response()->json([
             'mensaje' => 'Solicitud de servicio enviada con éxito.',
@@ -130,6 +142,10 @@ class SolicitudServicioController extends Controller
             ->with(['cliente:id,nombre,apellido,telefono', 'servicio', 'eventos'])
             ->orderBy('created_at', 'desc')
             ->get();
+
+        // ¿Cada solicitud está dentro del radio de atención del proveedor?
+        $perfil = $proveedor->perfilProveedor;
+        $solicitudes->each(fn ($s) => $s->setAttribute('zona_atencion', ZonaAtencion::evaluar($perfil, $s->latitud, $s->longitud)));
 
         return response()->json($solicitudes);
     }
@@ -183,6 +199,12 @@ class SolicitudServicioController extends Controller
             'resena:id,solicitud_id,calificacion',
             'eventos',
         ]);
+
+        $solicitud->setAttribute('zona_atencion', ZonaAtencion::evaluar(
+            PerfilProveedor::where('usuario_id', $solicitud->proveedor_id)->first(),
+            $solicitud->latitud,
+            $solicitud->longitud
+        ));
 
         return response()->json($solicitud);
     }
@@ -351,7 +373,7 @@ class SolicitudServicioController extends Controller
         if ($solicitud->estado !== 'aceptada') {
             return $this->conflicto($solicitud, 'iniciar el servicio');
         }
-        if ($solicitud->fecha && Carbon::now()->toDateString() < Carbon::parse($solicitud->fecha)->toDateString()) {
+        if ($solicitud->fecha && self::hoyLocal() < Carbon::parse($solicitud->fecha)->toDateString()) {
             return response()->json([
                 'mensaje' => 'Podrás iniciar el servicio a partir del ' . Carbon::parse($solicitud->fecha)->format('d/m/Y') . '.',
             ], 422);
@@ -392,7 +414,7 @@ class SolicitudServicioController extends Controller
         // No permitir marcar como completado antes de la fecha acordada
         if ($solicitud->fecha) {
             $fechaAcordada = Carbon::parse($solicitud->fecha)->toDateString();
-            $hoy = Carbon::now()->toDateString();
+            $hoy = self::hoyLocal();
             if ($hoy < $fechaAcordada) {
                 return response()->json([
                     'mensaje' => 'No puedes marcar el servicio como completado antes de la fecha acordada (' . Carbon::parse($solicitud->fecha)->format('d/m/Y') . ').'
@@ -613,6 +635,15 @@ class SolicitudServicioController extends Controller
             ->get();
 
         return response()->json($disputas);
+    }
+
+    /** Zona horaria de los usuarios (las fechas de las solicitudes son fechas locales). */
+    private const ZONA_HORARIA = 'America/Bogota';
+
+    /** Fecha de hoy (AAAA-MM-DD) en Colombia. */
+    private static function hoyLocal(): string
+    {
+        return Carbon::now(self::ZONA_HORARIA)->toDateString();
     }
 
     /** Cómo se nombra cada estado en los mensajes al usuario. */

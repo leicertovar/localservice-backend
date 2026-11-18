@@ -42,6 +42,8 @@ class ProveedorController extends Controller
                 // Zona de trabajo declarada por el proveedor
                 'radio_cobertura_km' => $perfil?->radio_cobertura_km,
                 'barrios_cobertura' => $perfil?->barrios_cobertura ?? [],
+                'latitud' => $perfil?->latitud,
+                'longitud' => $perfil?->longitud,
             ];
         });
 
@@ -168,7 +170,7 @@ class ProveedorController extends Controller
 
     /**
      * El proveedor actualiza su zona de trabajo: municipio, radio de desplazamiento y barrios.
-     * Es información para los clientes (se muestra en su perfil); no filtra solicitudes.
+     * Los clientes la ven en su perfil (mapa con el radio) y las solicitudes indican si quedan dentro o fuera.
      */
     public function actualizarZona(Request $request)
     {
@@ -179,14 +181,18 @@ class ProveedorController extends Controller
 
         $datos = $request->validate([
             'ciudad' => 'required|string|max:255',
-            'radio_cobertura_km' => 'required|integer|min:1|max:100',
+            'radio_cobertura_km' => 'required|integer|min:1|max:30',
+            'latitud' => 'required|numeric|between:-90,90',
+            'longitud' => 'required|numeric|between:-180,180',
             'barrios_cobertura' => 'required|array|min:1|max:30',
             'barrios_cobertura.*' => 'required|string|min:2|max:100',
         ], [
             'ciudad.required' => 'Elige el municipio donde trabajas.',
             'radio_cobertura_km.required' => 'Indica hasta cuántos kilómetros te desplazas.',
             'radio_cobertura_km.min' => 'El radio debe ser de al menos 1 km.',
-            'radio_cobertura_km.max' => 'El radio puede ser de máximo 100 km.',
+            'radio_cobertura_km.max' => 'El radio puede ser de máximo 30 km.',
+            'latitud.required' => 'Marca en el mapa el punto desde donde atiendes.',
+            'longitud.required' => 'Marca en el mapa el punto desde donde atiendes.',
             'barrios_cobertura.required' => 'Elige al menos un barrio donde atiendes.',
             'barrios_cobertura.min' => 'Elige al menos un barrio donde atiendes.',
             'barrios_cobertura.max' => 'Puedes elegir máximo 30 barrios.',
@@ -205,6 +211,8 @@ class ProveedorController extends Controller
             'ciudad' => trim($datos['ciudad']),
             'radio_cobertura_km' => $datos['radio_cobertura_km'],
             'barrios_cobertura' => array_values($barrios),
+            'latitud' => $datos['latitud'],
+            'longitud' => $datos['longitud'],
         ]);
 
         $usuario->load(['rol', 'perfilProveedor']);

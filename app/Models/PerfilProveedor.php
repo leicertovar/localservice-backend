@@ -32,6 +32,8 @@ class PerfilProveedor extends Model
         'ciudad',
         'radio_cobertura_km',
         'barrios_cobertura',
+        'latitud',
+        'longitud',
         'esta_verificado',
     ];
 
@@ -48,6 +50,8 @@ class PerfilProveedor extends Model
             'total_resenas' => 'integer',
             'radio_cobertura_km' => 'integer',
             'barrios_cobertura' => 'array',
+            'latitud' => 'float',
+            'longitud' => 'float',
         ];
     }
 
