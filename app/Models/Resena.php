@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Resena extends Model
 {
@@ -46,5 +47,17 @@ class Resena extends Model
     public function solicitud(): BelongsTo
     {
         return $this->belongsTo(SolicitudServicio::class, 'solicitud_id', 'id');
+    }
+
+    /** Todas las fotos (también las ocultadas por el administrador). */
+    public function imagenes(): HasMany
+    {
+        return $this->hasMany(ResenaImagen::class, 'resena_id')->orderBy('orden');
+    }
+
+    /** Fotos visibles para el público. */
+    public function imagenesVisibles(): HasMany
+    {
+        return $this->imagenes()->where('esta_ocultada', false);
     }
 }

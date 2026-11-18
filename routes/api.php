@@ -86,11 +86,15 @@ Route::middleware('auth:api')->group(function () {
     Route::put('/servicios/{id}', [\App\Http\Controllers\ServicioController::class, 'actualizarServicio']);
     Route::delete('/servicios/{id}', [\App\Http\Controllers\ServicioController::class, 'eliminarServicio']);
     Route::patch('/servicios/{id}/activar', [\App\Http\Controllers\ServicioController::class, 'alternarEstadoServicio']);
+    // Fotos de servicios (máximo 3)
+    Route::post('/servicios/{id}/imagenes', [\App\Http\Controllers\ServicioController::class, 'subirImagenes']);
+    Route::delete('/servicios/{id}/imagenes/{imagenId}', [\App\Http\Controllers\ServicioController::class, 'eliminarImagen']);
 
     // Solicitudes, Cotizaciones y Reservas
     Route::post('/solicitudes', [\App\Http\Controllers\SolicitudServicioController::class, 'crearSolicitud']);
     Route::get('/proveedor/solicitudes', [\App\Http\Controllers\SolicitudServicioController::class, 'obtenerSolicitudesProveedor']);
     Route::get('/cliente/solicitudes', [\App\Http\Controllers\SolicitudServicioController::class, 'obtenerSolicitudesCliente']);
+    Route::get('/historial', [\App\Http\Controllers\SolicitudServicioController::class, 'historial']);
     Route::post('/solicitudes/{id}/cotizar', [\App\Http\Controllers\SolicitudServicioController::class, 'cotizarSolicitud']);
     Route::post('/solicitudes/{id}/aceptar', [\App\Http\Controllers\SolicitudServicioController::class, 'aceptarCotizacion']);
     Route::post('/solicitudes/{id}/rechazar', [\App\Http\Controllers\SolicitudServicioController::class, 'rechazarSolicitud']);
@@ -121,6 +125,11 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/resenas', [ResenaController::class, 'crearResena']);
     Route::post('/resenas/{id}/responder', [ResenaController::class, 'responderResena']);
     Route::post('/resenas/{id}/reportar', [ResenaController::class, 'reportarResena']);
+    Route::get('/cliente/resenas', [ResenaController::class, 'misResenas']);
+    // Denuncias de fotos de reseñas y servicios
+    Route::post('/imagenes/{tipo}/{id}/denunciar', [\App\Http\Controllers\DenunciaImagenController::class, 'denunciar'])->whereIn('tipo', ['resena', 'servicio']);
+    Route::get('/admin/denuncias-imagenes', [\App\Http\Controllers\DenunciaImagenController::class, 'listar']);
+    Route::patch('/admin/denuncias-imagenes/{tipo}/{id}', [\App\Http\Controllers\DenunciaImagenController::class, 'resolver'])->whereIn('tipo', ['resena', 'servicio']);
     Route::get('/admin/resenas-reportadas', [ResenaController::class, 'listarReportadas']);
     Route::patch('/admin/resenas/{id}/moderar', [ResenaController::class, 'moderarResena']);
     Route::delete('/admin/resenas/{id}', [ResenaController::class, 'eliminarResena']);
