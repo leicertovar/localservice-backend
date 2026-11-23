@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Events\NotificacionCreada;
+use App\Services\PushFirebase;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
@@ -26,8 +27,9 @@ class Notificacion extends Model
     ];
 
     /**
-     * Cada notificación nueva llega al instante a la app (Laravel Reverb). Se emite después de
-     * confirmar la transacción y, si Reverb no responde, la notificación igual queda guardada.
+     * Cada notificación nueva llega al instante a la app abierta (Laravel Reverb) y al teléfono
+     * como push (Firebase). Se emite después de confirmar la transacción y, si alguno de los dos
+     * falla, la notificación igual queda guardada.
      */
     protected static function booted(): void
     {
@@ -38,6 +40,14 @@ class Notificacion extends Model
                 } catch (\Throwable $e) {
                     Log::warning('No se pudo emitir la notificación en tiempo real: ' . $e->getMessage());
                 }
+                // Push al teléfono (Firebase), después de enviar la respuesta para no demorarla
+                \Illuminate\Support\defer(function () use ($notificacion) {
+                    try {
+                        PushFirebase::enviarNotificacion($notificacion);
+                    } catch (\Throwable $e) {
+                        Log::warning('No se pudo enviar el push: ' . $e->getMessage());
+                    }
+                });
             });
         });
     }

@@ -45,4 +45,10 @@ return [
         'client_id' => env('GOOGLE_CLIENT_ID'),
     ],
 
+    // Notificaciones push (Firebase Cloud Messaging). Ver App\Services\PushFirebase.
+    'firebase' => [
+        'credentials_json' => env('FIREBASE_CREDENTIALS_JSON'),
+        'credentials' => env('FIREBASE_CREDENTIALS'),
+    ],
+
 ];

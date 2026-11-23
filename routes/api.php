@@ -113,6 +113,9 @@ Route::middleware('auth:api')->group(function () {
 
     // Notificaciones
     Route::get('/notificaciones', [NotificacionController::class, 'listar']);
+    // Teléfonos que reciben notificaciones push (Firebase)
+    Route::post('/dispositivos', [\App\Http\Controllers\DispositivoPushController::class, 'registrar']);
+    Route::delete('/dispositivos', [\App\Http\Controllers\DispositivoPushController::class, 'eliminar']);
     Route::post('/notificaciones/leer-todas', [NotificacionController::class, 'marcarTodasLeidas']);
     Route::patch('/notificaciones/{id}/leer', [NotificacionController::class, 'marcarLeida']);
 
