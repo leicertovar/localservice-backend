@@ -8,6 +8,8 @@ use App\Models\Notificacion;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use App\Events\MensajeActualizado;
 use App\Events\MensajeEnviado;
 
 class MensajeController extends Controller
@@ -20,10 +22,14 @@ class MensajeController extends Controller
         $usuario = JWTAuth::user();
 
         $mensajes = Mensaje::where(function ($q) use ($usuario, $otroUsuarioId) {
-            $q->where('emisor_id', $usuario->id)->where('receptor_id', $otroUsuarioId);
-        })->orWhere(function ($q) use ($usuario, $otroUsuarioId) {
-            $q->where('emisor_id', $otroUsuarioId)->where('receptor_id', $usuario->id);
+            $q->where(function ($q) use ($usuario, $otroUsuarioId) {
+                $q->where('emisor_id', $usuario->id)->where('receptor_id', $otroUsuarioId);
+            })->orWhere(function ($q) use ($usuario, $otroUsuarioId) {
+                $q->where('emisor_id', $otroUsuarioId)->where('receptor_id', $usuario->id);
+            });
         })
+        // Sin los que el usuario eliminó "para mí"
+        ->visiblesPara($usuario->id)
         ->with('emisor:id,nombre,apellido')
         ->orderBy('created_at', 'asc')
         ->get();
@@ -124,8 +130,8 @@ class MensajeController extends Controller
     {
         $usuario = JWTAuth::user();
 
-        $conversaciones = Mensaje::where('emisor_id', $usuario->id)
-            ->orWhere('receptor_id', $usuario->id)
+        $conversaciones = Mensaje::where(fn ($q) => $q->where('emisor_id', $usuario->id)->orWhere('receptor_id', $usuario->id))
+            ->visiblesPara($usuario->id)
             ->with(['emisor:id,nombre,apellido', 'receptor:id,nombre,apellido'])
             ->orderBy('created_at', 'desc')
             ->get()
@@ -145,5 +151,121 @@ class MensajeController extends Controller
             ->values();
 
         return response()->json($conversaciones);
+    }
+
+    /**
+     * El emisor edita el texto de su mensaje (hasta 5 minutos después de enviarlo).
+     */
+    public function editarMensaje(Request $request, $id)
+    {
+        $usuario = JWTAuth::user();
+        $mensaje = Mensaje::find($id);
+
+        if (!$mensaje || $mensaje->emisor_id !== $usuario->id || $mensaje->oculto_emisor) {
+            return response()->json(['mensaje' => 'Mensaje no encontrado.'], 404);
+        }
+        $datos = $request->validate([
+            'contenido' => 'required|string|max:2000',
+        ], [
+            'contenido.required' => 'Escribe el nuevo texto del mensaje.',
+            'contenido.max' => 'El mensaje puede tener máximo 2000 caracteres.',
+        ]);
+        if ($mensaje->eliminado_en) {
+            return response()->json(['mensaje' => 'Este mensaje ya fue eliminado.'], 422);
+        }
+        if ($mensaje->contenido === null || $mensaje->contenido === '') {
+            return response()->json(['mensaje' => 'Solo se puede editar el texto de un mensaje.'], 422);
+        }
+        if ($mensaje->created_at->lt(now()->subMinutes(Mensaje::MINUTOS_EDITAR))) {
+            return response()->json([
+                'mensaje' => 'Solo puedes editar un mensaje durante los ' . Mensaje::MINUTOS_EDITAR . ' minutos siguientes a enviarlo.',
+            ], 422);
+        }
+
+        $nuevo = trim($datos['contenido']);
+        if ($nuevo === '') {
+            return response()->json(['mensaje' => 'Escribe el nuevo texto del mensaje.'], 422);
+        }
+        if ($nuevo !== $mensaje->contenido) {
+            $mensaje->update(['contenido' => $nuevo, 'editado_en' => now()]);
+            // La notificación del receptor muestra el texto nuevo
+            $this->notificacionDe($mensaje)?->update(['descripcion' => "{$usuario->nombre}: " . mb_substr($nuevo, 0, 80)]);
+            $this->emitir(new MensajeActualizado($mensaje, [$mensaje->emisor_id, $mensaje->receptor_id]));
+        }
+
+        return response()->json($mensaje->load('emisor:id,nombre,apellido'));
+    }
+
+    /**
+     * Elimina un mensaje:
+     * - para=mi: desaparece solo del chat de quien lo elimina (el otro lo sigue viendo);
+     * - para=todos: solo el emisor y hasta 1 minuto después de enviarlo; los dos ven "Se eliminó este mensaje".
+     */
+    public function eliminarMensaje(Request $request, $id)
+    {
+        $usuario = JWTAuth::user();
+        $mensaje = Mensaje::find($id);
+        $esEmisor = $mensaje && $mensaje->emisor_id === $usuario->id;
+        $esReceptor = $mensaje && $mensaje->receptor_id === $usuario->id;
+
+        if (!$mensaje || (!$esEmisor && !$esReceptor) || ($esEmisor && $mensaje->oculto_emisor) || ($esReceptor && $mensaje->oculto_receptor)) {
+            return response()->json(['mensaje' => 'Mensaje no encontrado.'], 404);
+        }
+        $para = $request->query('para', $request->input('para', 'mi'));
+
+        if ($para === 'todos') {
+            if (!$esEmisor) {
+                return response()->json(['mensaje' => 'Solo quien envió el mensaje puede eliminarlo para todos.'], 403);
+            }
+            if ($mensaje->eliminado_en) {
+                return response()->json($mensaje);
+            }
+            // 1 minuto (+5 s de margen por la demora de la red)
+            if ($mensaje->created_at->lt(now()->subSeconds(Mensaje::SEGUNDOS_ELIMINAR_PARA_TODOS + 5))) {
+                return response()->json([
+                    'mensaje' => 'Solo puedes eliminar un mensaje para todos durante el primer minuto. Puedes eliminarlo para ti.',
+                ], 422);
+            }
+            if ($mensaje->url_archivo && str_starts_with($mensaje->url_archivo, '/storage/')) {
+                Storage::disk('public')->delete(substr($mensaje->url_archivo, strlen('/storage/')));
+            }
+            // Tampoco debe quedar el texto en la notificación del receptor
+            $this->notificacionDe($mensaje)?->delete();
+            $mensaje->update([
+                'eliminado_en' => now(),
+                'contenido' => null,
+                'url_archivo' => null,
+                'nombre_archivo' => null,
+                'leido' => true,
+            ]);
+            $this->emitir(new MensajeActualizado($mensaje, [$mensaje->emisor_id, $mensaje->receptor_id]));
+            return response()->json($mensaje->load('emisor:id,nombre,apellido'));
+        }
+
+        $mensaje->update($esEmisor ? ['oculto_emisor' => true] : ['oculto_receptor' => true, 'leido' => true]);
+        // Solo a los otros dispositivos de quien lo eliminó
+        $this->emitir(new MensajeActualizado($mensaje, [$usuario->id]));
+        return response()->json(['mensaje' => 'Mensaje eliminado de tu chat.']);
+    }
+
+    /** Notificación "Nuevo mensaje" que generó este mensaje (se creó en la misma petición). */
+    private function notificacionDe(Mensaje $mensaje): ?Notificacion
+    {
+        return Notificacion::where('usuario_id', $mensaje->receptor_id)
+            ->where('tipo', 'mensaje')
+            ->where('enlace', "chat:{$mensaje->emisor_id}")
+            ->whereBetween('created_at', [$mensaje->created_at->copy()->subSeconds(2), $mensaje->created_at->copy()->addSeconds(10)])
+            ->orderBy('id')
+            ->first();
+    }
+
+    /** Si Reverb no responde, el cambio ya quedó guardado y llega con la consulta de respaldo. */
+    private function emitir($evento): void
+    {
+        try {
+            broadcast($evento);
+        } catch (\Throwable $e) {
+            Log::warning('No se pudo emitir el cambio del mensaje en tiempo real: ' . $e->getMessage());
+        }
     }
 }

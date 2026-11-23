@@ -119,6 +119,8 @@ Route::middleware('auth:api')->group(function () {
     // Chat / Mensajes
     Route::get('/mensajes/{usuarioId}', [MensajeController::class, 'obtenerConversacion']);
     Route::post('/mensajes', [MensajeController::class, 'enviarMensaje']);
+    Route::patch('/mensajes/{id}', [MensajeController::class, 'editarMensaje'])->whereNumber('id');
+    Route::delete('/mensajes/{id}', [MensajeController::class, 'eliminarMensaje'])->whereNumber('id');
     Route::get('/conversaciones', [MensajeController::class, 'listarConversaciones']);
 
     // Reseñas
