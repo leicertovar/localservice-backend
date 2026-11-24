@@ -14,6 +14,8 @@ use App\Models\Usuario;
 use App\Models\Rol;
 use App\Models\PerfilCliente;
 use App\Models\PerfilProveedor;
+use App\Models\VerificacionProveedor;
+use App\Services\VerificacionIdentidad;
 use App\Models\SesionMovil;
 use App\Mail\ProveedorRegistradoMail;
 use App\Mail\ProveedorAprobadoMail;
@@ -42,9 +44,15 @@ class AuthController extends Controller
             'rol' => 'nullable|in:cliente,proveedor',
             // Reglas obligatorias para Proveedor
             'categoria_servicio' => 'required_if:rol,proveedor|string|max:255',
-            'doc_cedula'  => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            // Cédula: la app envía frente y reverso escaneados; el registro web, un solo archivo
+            'doc_cedula'  => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            'doc_cedula_frente'  => 'nullable|file|mimes:jpg,jpeg,png|max:10240|required_with:doc_cedula_reverso',
+            'doc_cedula_reverso' => 'nullable|file|mimes:jpg,jpeg,png|max:10240|required_with:doc_cedula_frente',
             'doc_rut'     => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
             'doc_diploma' => 'required_if:rol,proveedor|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            // Número de cédula escrito y datos leídos del reverso (PDF417 / MRZ), para la comparación
+            'numero_documento' => 'nullable|digits_between:6,10|required_with:doc_cedula_frente',
+            'datos_documento' => 'nullable|string|max:5000',
             // Zona de cobertura del proveedor (app móvil; opcional para el registro web)
             'ciudad' => 'nullable|string|max:255',
             'radio_cobertura_km' => 'nullable|integer|min:1|max:30',
@@ -53,6 +61,13 @@ class AuthController extends Controller
             'barrios_cobertura' => 'nullable|array|max:30',
             'barrios_cobertura.*' => 'string|max:100',
         ]);
+
+        // El proveedor debe enviar la cédula: escaneada por ambos lados (app) o en un archivo (web)
+        if (($datosValidados['rol'] ?? 'cliente') === 'proveedor' && !$request->hasFile('doc_cedula') && !$request->hasFile('doc_cedula_frente')) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'doc_cedula_frente' => 'Escanea o sube tu cédula por ambos lados.',
+            ]);
+        }
 
         // 2. Mapear el rol del formato string recibido al ID numérico relacional
         $nombreRol = $datosValidados['rol'] ?? 'cliente';
@@ -84,17 +99,7 @@ class AuthController extends Controller
 
         // 5. Estructurar y guardar los perfiles adicionales específicos del rol
         if ($nombreRol === 'proveedor') {
-            $guardarDoc = function (string $campo) use ($request) {
-                if ($request->hasFile($campo)) {
-                    $archivo = $request->file($campo);
-                    $nombre = time() . '_' . $campo . '_' . preg_replace('/\s+/', '_', $archivo->getClientOriginalName());
-                    $ruta = $archivo->storeAs('documentos', $nombre, 'public');
-                    return '/storage/' . $ruta;
-                }
-                return null;
-            };
-
-            PerfilProveedor::create([
+            $perfil = PerfilProveedor::create([
                 'usuario_id' => $usuario->id,
                 'categoria_servicio' => $datosValidados['categoria_servicio'],
                 'biografia' => $request->input('biografia'),
@@ -107,11 +112,12 @@ class AuthController extends Controller
                 'barrios_cobertura' => $datosValidados['barrios_cobertura'] ?? null,
                 'latitud' => $datosValidados['latitud'] ?? null,
                 'longitud' => $datosValidados['longitud'] ?? null,
-                'doc_cedula'  => $guardarDoc('doc_cedula'),
-                'doc_rut'     => $guardarDoc('doc_rut'),
-                'doc_diploma' => $guardarDoc('doc_diploma'),
                 'esta_verificado' => false,
             ]);
+
+            // Documentos cifrados (ya no en el disco público) y verificación con el porcentaje de
+            // coincidencia entre la cédula leída y el registro, lista para el agente de IA
+            $perfil->update(VerificacionIdentidad::registrar($usuario, $request));
 
             // Despachar la notificación por correo informando sobre el registro y la verificación pendiente
             try {
@@ -314,8 +320,9 @@ class AuthController extends Controller
         // 2. Filtrar proveedores pendientes de aprobación junto a sus perfiles públicos
         $proveedoresPendientes = Usuario::where('rol_id', 2)
             ->where('esta_aprobado', false)
-            ->with('perfilProveedor')
-            ->get();
+            ->with(['perfilProveedor', 'verificacionProveedor'])
+            ->get()
+            ->each(fn ($u) => $u->perfilProveedor?->conDocumentos());
 
         return response()->json([
             'proveedores_pendientes' => $proveedoresPendientes
@@ -358,6 +365,10 @@ class AuthController extends Controller
         // 5. Realizar el cambio de estatus de aprobación
         $usuario->esta_aprobado = true;
         $usuario->save();
+
+        // La decisión queda registrada en la verificación (más adelante también la tomará la IA)
+        VerificacionProveedor::firstWhere('usuario_id', $usuario->id)
+            ?->decidir(VerificacionProveedor::APROBADA, 'admin', $administrador->id);
 
         // 6. Activar la marca de verificación en su perfil público de proveedor
         if ($usuario->perfilProveedor) {
@@ -448,7 +459,8 @@ class AuthController extends Controller
             return response()->json(['mensaje' => 'Acceso denegado. Se requieren privilegios de administrador.'], 403);
         }
 
-        $usuarios = Usuario::with(['rol', 'perfilCliente', 'perfilProveedor'])->get();
+        $usuarios = Usuario::with(['rol', 'perfilCliente', 'perfilProveedor', 'verificacionProveedor'])->get()
+            ->each(fn ($u) => $u->perfilProveedor?->conDocumentos());
 
         return response()->json([
             'usuarios' => $usuarios
@@ -543,9 +555,12 @@ class AuthController extends Controller
             'nombre' => $usuario->nombre . ' ' . $usuario->apellido,
             'email' => $usuario->email,
             'categoria' => $p->categoria_servicio,
+            // Enlaces firmados y temporales: los archivos están cifrados en el disco privado
             'doc_cedula'  => $p->doc_cedula,
+            'doc_cedula_reverso' => $p->doc_cedula_reverso,
             'doc_rut'     => $p->doc_rut,
             'doc_diploma' => $p->doc_diploma,
+            'verificacion' => $usuario->verificacionProveedor,
         ]);
     }
 

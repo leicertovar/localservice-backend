@@ -38,6 +38,54 @@ class PerfilProveedor extends Model
     ];
 
     /**
+     * Documentos de verificación: privados. Solo el administrador los ve (conDocumentos()).
+     */
+    protected $hidden = ['doc_cedula', 'doc_cedula_reverso', 'doc_rut', 'doc_diploma', 'url_documento'];
+
+    protected $appends = ['doc_cedula_reverso'];
+
+    /** Para el administrador: incluye los documentos como enlaces firmados y temporales. */
+    public function conDocumentos(): static
+    {
+        return $this->makeVisible(['doc_cedula', 'doc_cedula_reverso', 'doc_rut', 'doc_diploma', 'url_documento']);
+    }
+
+    /** "cifrado:12" → enlace firmado al documento 12 (los registros antiguos guardan la ruta pública). */
+    private static function enlaceDocumento(?string $valor): ?string
+    {
+        if (!$valor || !str_starts_with($valor, 'cifrado:')) {
+            return $valor;
+        }
+        return DocumentoVerificacion::find((int) substr($valor, 8))?->urlFirmada();
+    }
+
+    public function getDocCedulaAttribute($valor): ?string
+    {
+        return self::enlaceDocumento($valor);
+    }
+
+    public function getDocRutAttribute($valor): ?string
+    {
+        return self::enlaceDocumento($valor);
+    }
+
+    public function getDocDiplomaAttribute($valor): ?string
+    {
+        return self::enlaceDocumento($valor);
+    }
+
+    public function getUrlDocumentoAttribute($valor): ?string
+    {
+        return self::enlaceDocumento($valor);
+    }
+
+    /** Reverso de la cédula escaneado en la app (el registro web lo envía junto con el frente). */
+    public function getDocCedulaReversoAttribute(): ?string
+    {
+        return DocumentoVerificacion::where('usuario_id', $this->usuario_id)->where('tipo', 'cedula_reverso')->latest('id')->first()?->urlFirmada();
+    }
+
+    /**
      * Conversión de tipos de atributos.
      */
     protected function casts(): array

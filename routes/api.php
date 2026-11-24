@@ -146,3 +146,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/proveedor/foto-perfil', [\App\Http\Controllers\ProveedorController::class, 'actualizarPerfilProveedor']);
 });
 
+// Documento de verificación (cifrado): solo con enlace firmado y temporal que genera la API para el administrador
+Route::get('/documentos-verificacion/{documento}', [\App\Http\Controllers\DocumentoVerificacionController::class, 'ver'])
+    ->name('documentos.ver')
+    ->middleware(['signed:relative', 'throttle:60,1']);

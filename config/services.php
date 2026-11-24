@@ -45,6 +45,16 @@ return [
         'client_id' => env('GOOGLE_CLIENT_ID'),
     ],
 
+    // Verificación de proveedores con el agente de IA (Gemini), aún no conectado.
+    // Con puntuación >= umbral_aprobacion se aprobará sola; por debajo de umbral_revision se
+    // rechazará la lectura y entre ambos irá al administrador.
+    'verificacion' => [
+        'umbral_aprobacion' => (float) env('VERIFICACION_UMBRAL_APROBACION', 85),
+        'umbral_revision' => (float) env('VERIFICACION_UMBRAL_REVISION', 50),
+        'gemini_api_key' => env('GEMINI_API_KEY'),
+        'gemini_modelo' => env('GEMINI_MODELO'),
+    ],
+
     // Notificaciones push (Firebase Cloud Messaging). Ver App\Services\PushFirebase.
     'firebase' => [
         'credentials_json' => env('FIREBASE_CREDENTIALS_JSON'),

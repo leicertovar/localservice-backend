@@ -73,6 +73,18 @@ class Usuario extends \Illuminate\Foundation\Auth\User implements JWTSubject
     /**
      * Obtener el perfil de proveedor asociado con el usuario.
      */
+    /** Verificación de identidad del proveedor (lectura de la cédula, coincidencia, IA). */
+    public function verificacionProveedor(): HasOne
+    {
+        return $this->hasOne(VerificacionProveedor::class, 'usuario_id', 'id');
+    }
+
+    /** Al eliminar la cuenta (o rechazar al proveedor) se borran sus documentos cifrados del disco. */
+    protected static function booted(): void
+    {
+        static::deleting(fn (self $usuario) => \App\Services\DocumentosCifrados::eliminarDeUsuario($usuario->id));
+    }
+
     public function perfilProveedor(): HasOne
     {
         return $this->hasOne(PerfilProveedor::class, 'usuario_id', 'id');
